@@ -2,6 +2,16 @@ import torch
 import torch.nn as nn
 
 
+class LayerNorm(nn.LayerNorm):
+    '''Temporarily convert precision to fp32'''
+
+    def forward(self, x: torch.Tensor):
+        orig_type = x.dtype
+        # inherit the forward method from torch.nn.LayerNorm
+        ret = super().forward(x.type(torch.float32))
+        return ret.type(orig_type)
+
+
 class BatchNorm(nn.BatchNorm1d):
     '''Temporarily convert precision to fp32'''
 
@@ -21,21 +31,26 @@ class QuickGELU(nn.Module):
 class FeatureFusion(nn.Module):
     def __init__(
         self,
-        output_patches: int,
+        num_patches: int,
+        num_dim: int,
         output_dim: int,
         dropout: float = 0.0
-
     ):
         super().__init__()
-        self.output_patches = output_patches
+        self.num_patches = num_patches
+        self.num_dim = num_dim
         self.output_dim = output_dim
 
-        self.linear_1 = nn.Linear(self.output_patches * 3, self.output_patches)
-        self.linear_2 = nn.Linear(self.output_patches, self.output_patches * 3)
+        self.linear_1 = nn.Linear(self.num_patches * 3, self.num_patches)
+        self.linear_2 = nn.Linear(self.num_patches, self.num_patches * 3)
         self.gelu = QuickGELU()
-        self.bn_1 = BatchNorm(self.output_patches)
-        self.bn_2 = BatchNorm(self.output_patches * 3)
+        self.bn_1 = BatchNorm(self.num_patches)
+        self.bn_2 = BatchNorm(self.num_patches * 3)
+        self.ln = LayerNorm(self.num_dim)
         self.dropout = nn.Dropout(dropout)
+        scale = num_dim ** -0.5
+        self.final_weight = nn.Parameter(
+            scale * torch.randn(self.num_dim, self.output_dim))
 
     def forward(self, x: torch.Tensor):
         # element-wise summation
@@ -78,11 +93,8 @@ class FeatureFusion(nn.Module):
         x = self.bn_1(x)
         x = self.dropout(x)
 
+        # layernorm for the final output with additional final projection weights
+        x = self.ln(x[:, 0, :])
+        x = x @ self.final_weight
+
         return x
-
-
-# (num_modalities, n, output_patches, output_dim)
-x = torch.randn(4, 10, 246, 1024)
-model = FeatureFusion(output_patches=246, output_dim=768)
-out = model(x)
-print(out.shape)

@@ -222,10 +222,3 @@ class ViT3D(nn.Module):
         x = torch.cat((cls_token, linear_x), dim=1)
         x = self.ln_2(x)
         return x
-
-
-test_tensor = torch.randn(10, 1, 30, 224, 224)
-model = ViT3D(image_size=224, frame_size=30, image_patch=16, frame_patch=3, num_channels=1,
-              num_heads=4, num_layers=1, hidden_dim=1024, dropout=0.5, attention_dropout=0.5, output_patches=245)
-out = model(test_tensor)
-print(out.shape)
