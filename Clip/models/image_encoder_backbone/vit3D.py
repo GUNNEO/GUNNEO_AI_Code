@@ -1,6 +1,6 @@
 from collections import OrderedDict
-from typing import Callable, NamedTuple, Optional, List
-from torchvision.ops.misc import Conv2dNormActivation
+from typing import Callable, NamedTuple, Optional
+from torchvision.ops.misc import Conv3dNormActivation
 import torch
 import torch.nn as nn
 
@@ -10,7 +10,7 @@ class ConvStemConfig(NamedTuple):
     kernel_size: int
     stride: int
     # indicates it can accept ant type of input and return nn.Module
-    norm_layer: Callable[..., nn.Module] = nn.BatchNorm2d
+    norm_layer: Callable[..., nn.Module] = nn.BatchNorm3d
     activation_layer: Callable[..., nn.Module] = nn.ReLU
 
 
@@ -109,58 +109,67 @@ class Encoder(nn.Module):
         return self.layers(x)
 
 
-class ViT(nn.Module):
+class ViT3D(nn.Module):
     def __init__(
         self,
         image_size: int,
-        patch_size: int,
+        frame_size: int,
+        image_patch: int,
+        frame_patch: int,
         num_channels: int,
-        num_layers: int,
         num_heads: int,
+        num_layers: int,
         hidden_dim: int,
         dropout: float = 0.0,
         attention_dropout: float = 0.0,
         output_patches: Optional[int] = None,
-        conv_stem_config: Optional[List[ConvStemConfig]] = None
+        conv_stem_config: Optional[ConvStemConfig] = None
     ):
         super().__init__()
-        num_patches = (image_size // patch_size) ** 2 + 1
-        torch._assert(image_size % patch_size == 0,
-                      'image shape indivisable by patch size')
+        num_patches = (image_size // image_patch) ** 2 * \
+            (frame_size // frame_patch) + 1
+        torch._assert(image_size % image_patch == 0,
+                      "image size should be divisable by image patch")
+        torch._assert(frame_size % frame_patch == 0,
+                      "frame size should be divisable by frame patch")
         if output_patches is not None:
             torch._assert((num_patches - 1) % output_patches == 0,
                           f"output_patches should be divisable by the number of patches {num_patches - 1}")
+
         self.image_size = image_size
-        self.patch_size = patch_size
-        self.num_layers = num_layers
+        self.image_patch = image_patch
+        self.frame_size = frame_size
+        self.frame_patch = frame_patch
+        self.num_channels = num_channels
         self.num_heads = num_heads
+        self.num_layers = num_layers
         self.hidden_dim = hidden_dim
-        self.output_patches = num_patches - 1 if output_patches is None else output_patches
         self.dropout = dropout
         self.attention_dropout = attention_dropout
+        self.output_patches = output_patches
 
-        # define the pre_cov for specific input
+        # initialize the predefined conv network
         if conv_stem_config is not None:
             prev_channels = num_channels
             seq_proj = nn.Sequential()
             for i, conv_stem_layer_config in enumerate(conv_stem_config):
                 seq_proj.add_module(f"conv_bn_relu{i}",
-                                    Conv2dNormActivation(in_channels=prev_channels,
+                                    Conv3dNormActivation(in_channels=prev_channels,
                                                          out_channels=conv_stem_layer_config.out_channels,
                                                          kernel_size=conv_stem_layer_config.kernel_size,
                                                          stride=conv_stem_layer_config.stride,
                                                          norm_layer=conv_stem_layer_config.norm_layer,
                                                          activation_layer=conv_stem_layer_config.activation_layer))
                 prev_channels = conv_stem_layer_config.out_channels
-            seq_proj.add_module("conv_last", nn.Conv2d(
+            seq_proj.add_module("conv_last", nn.Conv3d(
                 in_channels=prev_channels, out_channels=self.hidden_dim, kernel_size=1))
             self.conv_proj: nn.Module = seq_proj
         else:
-            self.conv_proj: nn.Module = nn.Conv2d(
-                in_channels=num_channels, out_channels=self.hidden_dim, kernel_size=self.patch_size, stride=self.patch_size)
+            self.conv_proj: nn.Module = nn.Conv3d(in_channels=self.num_channels, out_channels=self.hidden_dim, kernel_size=(
+                self.frame_patch, self.image_patch, self.image_patch), stride=(self.frame_patch, self.image_patch, self.image_patch))
 
-        # add class tokens and position embedding
-        scale = hidden_dim ** -0.5
+        self.output_patches = num_patches - 1 if output_patches is None else output_patches
+        scale = self.hidden_dim ** -0.5
         self.class_token = nn.Parameter(scale * torch.randn(self.hidden_dim))
         self.position_embedding = nn.Parameter(
             scale * torch.randn(num_patches, self.hidden_dim))
@@ -172,37 +181,32 @@ class ViT(nn.Module):
         self.encoder = Encoder(num_layers=self.num_layers, num_heads=self.num_heads, hidden_dim=hidden_dim,
                                mlp_dim=mlp_dim, dropout=self.dropout, attention_dropout=self.attention_dropout)
 
-        # (n, hidden_dim, num_patches) -> (n, hidden_dim, output_patches)
         self.linear = nn.Linear(num_patches - 1, self.output_patches)
 
         self.ln_2 = LayerNorm(self.hidden_dim)
 
-    def _process_input(self, x: torch.Tensor) -> torch.Tensor:
-        n, c, h, w = x.shape
-        p = self.patch_size
+    def _process_input(self, x: torch.Tensor):
+        n, c, d, h, w = x.shape
+        img_p = self.image_patch
+        frame_p = self.frame_patch
         torch._assert(h == self.image_size, ("Wrong image height! Expected ",
                       str(self.image_size), " but got ", str(h), "!"))
         torch._assert(w == self.image_size, ("Wrong image width! Expected ",
                       str(self.image_size), " but got ", str(w), "!"))
+        torch._assert(d == self.frame_size, ("Wrong image depth! Expected ",
+                      str(self.frame_size), " but got ", str(d), "!"))
 
-        n_h = h // p
-        n_w = w // p
+        n_h = h // img_p
+        n_w = w // img_p
+        n_d = d // frame_p
 
-        # (n, c, h, w) -> (n, hidden_dim, n_h, n_w)
         x = self.conv_proj(x)
-        # (n, hidden_dim, n_h, n_w) -> (n, hidden_dim, (n_h * n_w))
-        x = x.reshape(n, self.hidden_dim, n_h * n_w)
-
-        # (n, hidden_dim, (n_h * n_w)) -> (n, (n_h * n_w), hidden_dim)
-        # The self attention layer expects inputs in the format (N, S, E)
-        # where S is the source sequence length, N is the batch size, E is the
-        # embedding dimension
+        x = x.reshape(n, self.hidden_dim, (n_h * n_w * n_d))
         x = x.permute(0, 2, 1)
-
         return x
 
     def forward(self, x: torch.Tensor):
-        x = self._process_input(x)  # shape: (n, (n_h, n_w), hidden_dim)
+        x = self._process_input(x)
         x = torch.cat([self.class_token.to(x.dtype) + torch.zeros(x.shape[0],
                       1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)
         x = x + self.position_embedding.to(x.dtype)
@@ -218,3 +222,10 @@ class ViT(nn.Module):
         x = torch.cat((cls_token, linear_x), dim=1)
         x = self.ln_2(x)
         return x
+
+
+test_tensor = torch.randn(10, 1, 30, 224, 224)
+model = ViT3D(image_size=224, frame_size=30, image_patch=16, frame_patch=3, num_channels=1,
+              num_heads=4, num_layers=1, hidden_dim=1024, dropout=0.5, attention_dropout=0.5, output_patches=245)
+out = model(test_tensor)
+print(out.shape)
