@@ -46,7 +46,7 @@ class EncoderBlock(nn.Module):
 
         # Attention block
         self.ln_1 = LayerNorm(hidden_dim)
-        self.self_attention = nn.MultiheadAttention(
+        self.attn = nn.MultiheadAttention(
             hidden_dim, num_heads, dropout=attention_dropout, batch_first=True)
         self.dropout = nn.Dropout(dropout)
 
@@ -61,16 +61,16 @@ class EncoderBlock(nn.Module):
 
     def attention_mask(self, x: torch.Tensor):
         if self.attn_mask is not None:
-            return self.attn_mask.to(dtype=x.type, device=x.type)
+            return self.attn_mask.to(dtype=x.dtype, device=x.device)
         else:
-            return x
+            return self.attn_mask
 
     def forward(self, input: torch.Tensor):
         torch._assert(input.dim(
         ) == 3, f"Expected (batch_size, seq_length, hidden_dim) got {input.shape}")
         x = self.ln_1(input)
-        x, _ = self.self_attention(
-            x, x, x, need_weights=False, attn_mask=self.attention_mask(self.attn_mask))
+        x, _ = self.attn(
+            x, x, x, need_weights=False, attn_mask=self.attention_mask(x))
         x = self.dropout(x)
         x = x + input
 
@@ -93,6 +93,11 @@ class Encoder(nn.Module):
         attn_mask: torch.Tensor = None
     ):
         super().__init__()
+        self.num_layers = num_layers
+        self.num_heads = num_heads
+        self.hidden_dim = hidden_dim
+        self.mlp_dim = mlp_dim
+        self.attn_mask = attn_mask
         layers: OrderedDict[str, nn.Module] = OrderedDict()
         for i in range(num_layers):
             layers[f"encoder_layer_{i}"] = EncoderBlock(
@@ -129,12 +134,12 @@ class ViT3D(nn.Module):
         num_patches = (image_size // image_patch) ** 2 * \
             (frame_size // frame_patch) + 1
         torch._assert(image_size % image_patch == 0,
-                      "image size should be divisable by image patch")
+                      f"image size {image_size} indivisable by image patch {image_patch}")
         torch._assert(frame_size % frame_patch == 0,
-                      "frame size should be divisable by frame patch")
+                      f"frame size {frame_size} indivisable by frame patch {frame_patch}")
         if output_patches is not None:
             torch._assert((num_patches - 1) % output_patches == 0,
-                          f"output_patches should be divisable by the number of patches {num_patches - 1}")
+                          f"output_patches indivisable by the number of patches {num_patches - 1}")
 
         self.image_size = image_size
         self.image_patch = image_patch
@@ -213,6 +218,7 @@ class ViT3D(nn.Module):
         x = self.ln_1(x)
 
         # input shape = output shape: (n, num_patches, hidden_dim)
+        # the transformer attn expect a input size (seq_length, n, hidden_dim)
         x = self.encoder(x)
         # centrally focus on the first layer of encoder output, other approches
         # such as linear projection or average pooling can be applied
