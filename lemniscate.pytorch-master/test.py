@@ -31,8 +31,8 @@ def NN(epoch, net, lemniscate, trainloader, testloader, recompute_memory=0):
             targets = targets.cuda(async=True)
             batchSize = inputs.size(0)
             features = net(inputs)
-            trainFeatures[:, batch_idx*batchSize:batch_idx *
-                          batchSize+batchSize] = features.data.t()
+            trainFeatures[:, batch_idxu * batchSize:batch_idx *
+                          batchSize + batchSize] = features.data.t()
         trainLabels = torch.LongTensor(temploader.dataset.train_labels).cuda()
         trainloader.dataset.transform = transform_bak
 
@@ -64,9 +64,9 @@ def NN(epoch, net, lemniscate, trainloader, testloader, recompute_memory=0):
                   'Net Time {net_time.val:.3f} ({net_time.avg:.3f})\t'
                   'Cls Time {cls_time.val:.3f} ({cls_time.avg:.3f})\t'
                   'Top1: {:.2f}'.format(
-                      total, testsize, correct*100./total, net_time=net_time, cls_time=cls_time))
+                      total, testsize, correct * 100. / total, net_time=net_time, cls_time=cls_time))
 
-    return correct/total
+    return correct / total
 
 
 def kNN(epoch, net, lemniscate, trainloader, testloader, K, sigma, recompute_memory=0):
@@ -93,8 +93,8 @@ def kNN(epoch, net, lemniscate, trainloader, testloader, K, sigma, recompute_mem
             targets = targets.cuda(async=True)
             batchSize = inputs.size(0)
             features = net(inputs)
-            trainFeatures[:, batch_idx*batchSize:batch_idx *
-                          batchSize+batchSize] = features.data.t()
+            trainFeatures[:, batch_idx * batchSize:batch_idx *
+                          batchSize + batchSize] = features.data.t()
         trainLabels = torch.LongTensor(temploader.dataset.train_labels).cuda()
         trainloader.dataset.transform = transform_bak
 
@@ -137,8 +137,8 @@ def kNN(epoch, net, lemniscate, trainloader, testloader, K, sigma, recompute_mem
                   'Net Time {net_time.val:.3f} ({net_time.avg:.3f})\t'
                   'Cls Time {cls_time.val:.3f} ({cls_time.avg:.3f})\t'
                   'Top1: {:.2f}  Top5: {:.2f}'.format(
-                      total, testsize, top1*100./total, top5*100./total, net_time=net_time, cls_time=cls_time))
+                      total, testsize, top1 * 100. / total, top5 * 100. / total, net_time=net_time, cls_time=cls_time))
 
-    print(top1*100./total)
+    print(top1 * 100. / total)
 
-    return top1/total
+    return top1 / total

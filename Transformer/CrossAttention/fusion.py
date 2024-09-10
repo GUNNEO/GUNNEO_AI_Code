@@ -66,7 +66,7 @@ class CrossAttentionFusion(nn.Module):
 
     def forward(
         self,
-        features: List,
+        features: List[torch.Tensor],
         mask: Optional[torch.Tensor] = None
     ):
         x = features[0]

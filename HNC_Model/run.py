@@ -4,7 +4,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 import os
 import pandas as pd
-from sklearn.metrics import roc_auc_score, accuracy_score, recall_score, precision_score, f1_score
+from sklearn.metrics import roc_auc_score
 import random
 import numpy as np
 import copy
@@ -131,4 +131,4 @@ for epoch in range(epochs):
             f"    No improvement in AUROC for {patience} consecutive epochs, stopping early.")
         break
     print(f"    Epoch {epoch + 1}/{epochs} - Validation AUROC: {auc}")
-    torch.save(m.state_dict(), 'model_weights_' + str(best_epoch) + '.pth')
+    # torch.save(m.state_dict(), f'model_weights_{best_epoch}.pth')

@@ -1,7 +1,7 @@
 from __future__ import print_function
 from PIL import Image
 import torchvision.datasets as datasets
-import torch.utils.data as data
+
 
 class MNISTInstance(datasets.MNIST):
     """MNIST Instance Dataset.

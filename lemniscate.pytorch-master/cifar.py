@@ -5,12 +5,9 @@ import sys
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 
-import torchvision
 import torchvision.transforms as transforms
-import lib.custom_transforms as custom_transforms
 
 import os
 import argparse
@@ -18,13 +15,12 @@ import time
 
 import models
 import datasets
-import math
 
 from lib.NCEAverage import NCEAverage
 from lib.LinearAverage import LinearAverage
 from lib.NCECriterion import NCECriterion
 from lib.utils import AverageMeter
-from test import NN, kNN
+from test import kNN
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('--lr', default=0.03, type=float, help='learning rate')
@@ -95,7 +91,7 @@ if args.test_only or len(args.resume) > 0:
     # Load checkpoint.
     print('==> Resuming from checkpoint..')
     assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
-    checkpoint = torch.load('./checkpoint/'+args.resume)
+    checkpoint = torch.load('./checkpoint/' + args.resume)
     net.load_state_dict(checkpoint['net'])
     lemniscate = checkpoint['lemniscate']
     best_acc = checkpoint['acc']
@@ -123,7 +119,7 @@ def adjust_learning_rate(optimizer, epoch):
     """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
     lr = args.lr
     if epoch >= 80:
-        lr = args.lr * (0.1 ** ((epoch-80) // 40))
+        lr = args.lr * (0.1 ** ((epoch - 80) // 40))
     print(lr)
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
@@ -137,8 +133,6 @@ def train(epoch):
     train_loss = AverageMeter()
     data_time = AverageMeter()
     batch_time = AverageMeter()
-    correct = 0
-    total = 0
 
     # switch to train mode
     net.train()
@@ -170,7 +164,7 @@ def train(epoch):
                   epoch, batch_idx, len(trainloader), batch_time=batch_time, data_time=data_time, train_loss=train_loss))
 
 
-for epoch in range(start_epoch, start_epoch+200):
+for epoch in range(start_epoch, start_epoch + 200):
     train(epoch)
     acc = kNN(epoch, net, lemniscate, trainloader,
               testloader, 200, args.nce_t, 0)
@@ -188,7 +182,7 @@ for epoch in range(start_epoch, start_epoch+200):
         torch.save(state, './checkpoint/ckpt.t7')
         best_acc = acc
 
-    print('best accuracy: {:.2f}'.format(best_acc*100))
+    print('best accuracy: {:.2f}'.format(best_acc * 100))
 
 acc = kNN(0, net, lemniscate, trainloader, testloader, 200, args.nce_t, 1)
-print('last accuracy: {:.2f}'.format(acc*100))
+print('last accuracy: {:.2f}'.format(acc * 100))

@@ -25,8 +25,8 @@ from lib.utils import AverageMeter
 from test import NN, kNN
 
 model_names = sorted(name for name in models.__dict__
-    if name.islower() and not name.startswith("__")
-    and callable(models.__dict__[name]))
+                     if name.islower() and not name.startswith("__")
+                     and callable(models.__dict__[name]))
 
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
 parser.add_argument('data', metavar='DIR',
@@ -34,8 +34,8 @@ parser.add_argument('data', metavar='DIR',
 parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet18',
                     choices=model_names,
                     help='model architecture: ' +
-                        ' | '.join(model_names) +
-                        ' (default: resnet18)')
+                    ' | '.join(model_names) +
+                    ' (default: resnet18)')
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 parser.add_argument('--epochs', default=200, type=int, metavar='N',
@@ -69,7 +69,7 @@ parser.add_argument('--low-dim', default=128, type=int,
                     metavar='D', help='feature dimension')
 parser.add_argument('--nce-k', default=4096, type=int,
                     metavar='K', help='number of negative samples for NCE')
-parser.add_argument('--nce-t', default=0.07, type=float, 
+parser.add_argument('--nce-t', default=0.07, type=float,
                     metavar='T', help='temperature parameter for softmax')
 parser.add_argument('--nce-m', default=0.5, type=float,
                     help='momentum for non-parametric updates')
@@ -77,6 +77,7 @@ parser.add_argument('--iter_size', default=1, type=int,
                     help='caffe style iter size')
 
 best_prec1 = 0
+
 
 def main():
     global args, best_prec1
@@ -106,7 +107,6 @@ def main():
         model.cuda()
         model = torch.nn.parallel.DistributedDataParallel(model)
 
-
     # Data loading code
     traindir = os.path.join(args.data, 'train')
     valdir = os.path.join(args.data, 'val')
@@ -116,7 +116,7 @@ def main():
     train_dataset = datasets.ImageFolderInstance(
         traindir,
         transforms.Compose([
-            transforms.RandomResizedCrop(224, scale=(0.2,1.)),
+            transforms.RandomResizedCrop(224, scale=(0.2, 1.)),
             transforms.RandomGrayscale(p=0.2),
             transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
             transforms.RandomHorizontalFlip(),
@@ -125,12 +125,14 @@ def main():
         ]))
 
     if args.distributed:
-        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+        train_sampler = torch.utils.data.distributed.DistributedSampler(
+            train_dataset)
     else:
         train_sampler = None
 
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
+        train_dataset, batch_size=args.batch_size, shuffle=(
+            train_sampler is None),
         num_workers=args.workers, pin_memory=True, sampler=train_sampler)
 
     val_loader = torch.utils.data.DataLoader(
@@ -146,10 +148,12 @@ def main():
     # define lemniscate and loss function (criterion)
     ndata = train_dataset.__len__()
     if args.nce_k > 0:
-        lemniscate = NCEAverage(args.low_dim, ndata, args.nce_k, args.nce_t, args.nce_m).cuda()
+        lemniscate = NCEAverage(args.low_dim, ndata,
+                                args.nce_k, args.nce_t, args.nce_m).cuda()
         criterion = NCECriterion(ndata).cuda()
     else:
-        lemniscate = LinearAverage(args.low_dim, ndata, args.nce_t, args.nce_m).cuda()
+        lemniscate = LinearAverage(
+            args.low_dim, ndata, args.nce_t, args.nce_m).cuda()
         criterion = nn.CrossEntropyLoss().cuda()
 
     optimizer = torch.optim.SGD(model.parameters(), args.lr,
@@ -197,7 +201,7 @@ def main():
             'state_dict': model.state_dict(),
             'lemniscate': lemniscate,
             'best_prec1': best_prec1,
-            'optimizer' : optimizer.state_dict(),
+            'optimizer': optimizer.state_dict(),
         }, is_best)
     # evaluate KNN after last epoch
     kNN(0, model, lemniscate, train_loader, val_loader, 200, args.nce_t)
@@ -229,7 +233,7 @@ def train(train_loader, model, lemniscate, criterion, optimizer, epoch):
         # measure accuracy and record loss
         losses.update(loss.item() * args.iter_size, input.size(0))
 
-        if (i+1) % args.iter_size == 0:
+        if (i + 1) % args.iter_size == 0:
             # compute gradient and do SGD step
             optimizer.step()
             optimizer.zero_grad()
@@ -243,14 +247,15 @@ def train(train_loader, model, lemniscate, criterion, optimizer, epoch):
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'.format(
-                   epoch, i, len(train_loader), batch_time=batch_time,
-                   data_time=data_time, loss=losses))
+                      epoch, i, len(train_loader), batch_time=batch_time,
+                      data_time=data_time, loss=losses))
 
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
     torch.save(state, filename)
     if is_best:
         shutil.copyfile(filename, 'model_best.pth.tar')
+
 
 def adjust_learning_rate(optimizer, epoch):
     """Sets the learning rate to the initial LR decayed by 10 every 100 epochs"""
@@ -261,7 +266,7 @@ def adjust_learning_rate(optimizer, epoch):
         lr = args.lr * 0.1
     else:
         lr = args.lr * 0.01
-    #lr = args.lr * (0.1 ** (epoch // 100))
+    # lr = args.lr * (0.1 ** (epoch // 100))
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 

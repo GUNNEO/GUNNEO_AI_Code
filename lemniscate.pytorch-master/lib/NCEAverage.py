@@ -12,7 +12,6 @@ class NCEFunction(Function):
         T = params[1].item()
         Z = params[2].item()
 
-        momentum = params[3].item()
         batchSize = x.size(0)
         outputSize = memory.size(0)
         inputSize = memory.size(1)
@@ -22,7 +21,7 @@ class NCEFunction(Function):
 
         # sample correspoinding weights
         weight = torch.index_select(memory, 0, idx.view(-1))
-        weight.resize_(batchSize, K+1, inputSize)
+        weight.resize_(batchSize, K + 1, inputSize)
 
         # inner product
         out = torch.bmm(weight, x.data.resize_(batchSize, inputSize, 1))
@@ -34,7 +33,7 @@ class NCEFunction(Function):
             Z = params[2].item()
             print("normalization constant Z is set to {:.1f}".format(Z))
 
-        out.div_(Z).resize_(batchSize, K+1)
+        out.div_(Z).resize_(batchSize, K + 1)
 
         self.save_for_backward(x, memory, y, weight, out, params)
 
@@ -45,7 +44,6 @@ class NCEFunction(Function):
         x, memory, y, weight, out, params = self.saved_tensors
         K = int(params[0].item())
         T = params[1].item()
-        Z = params[2].item()
         momentum = params[3].item()
         batchSize = gradOutput.size(0)
 
@@ -54,7 +52,7 @@ class NCEFunction(Function):
         # add temperature
         gradOutput.data.div_(T)
 
-        gradOutput.data.resize_(batchSize, 1, K+1)
+        gradOutput.data.resize_(batchSize, 1, K + 1)
 
         # gradient of linear
         gradInput = torch.bmm(gradOutput.data, weight)
@@ -63,7 +61,7 @@ class NCEFunction(Function):
         # update the non-parametric data
         weight_pos = weight.select(1, 0).resize_as_(x)
         weight_pos.mul_(momentum)
-        weight_pos.add_(torch.mul(x.data, 1-momentum))
+        weight_pos.add_(torch.mul(x.data, 1 - momentum))
         w_norm = weight_pos.pow(2).sum(1, keepdim=True).pow(0.5)
         updated_weight = weight_pos.div(w_norm)
         memory.index_copy_(0, y, updated_weight)
@@ -82,12 +80,13 @@ class NCEAverage(nn.Module):
         self.K = K
 
         self.register_buffer('params', torch.tensor([K, T, -1, momentum]))
-        stdv = 1. / math.sqrt(inputSize/3)
+        stdv = 1. / math.sqrt(inputSize / 3)
         self.register_buffer('memory', torch.rand(
-            outputSize, inputSize).mul_(2*stdv).add_(-stdv))
+            outputSize, inputSize).mul_(2 * stdv).add_(-stdv))
 
     def forward(self, x, y):
         batchSize = x.size(0)
-        idx = self.multinomial.draw(batchSize * (self.K+1)).view(batchSize, -1)
+        idx = self.multinomial.draw(
+            batchSize * (self.K + 1)).view(batchSize, -1)
         out = NCEFunction.apply(x, y, self.memory, idx, self.params)
         return out

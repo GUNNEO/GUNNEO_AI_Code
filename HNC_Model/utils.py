@@ -6,8 +6,7 @@ from PIL import Image
 from torchvision import transforms
 import json
 import torch
-from einops import rearrange, repeat
-from einops.layers.torch import Rearrange
+from einops import rearrange
 
 
 class raiseException(Exception):

@@ -70,16 +70,16 @@ class Decoder(nn.Module):
         # TODO bias=True
         super(Decoder, self).__init__()
         # conv(1*1) -> ConvTranspose(3*3) -> conv(1*1)
-        self.conv1 = nn.Sequential(nn.Conv2d(in_planes, in_planes//4, 1, 1, 0,
+        self.conv1 = nn.Sequential(nn.Conv2d(in_planes, in_planes // 4, 1, 1, 0,
                                    bias=bias),
-                                   nn.BatchNorm2d(in_planes//4),
+                                   nn.BatchNorm2d(in_planes // 4),
                                    nn.ReLU(inplace=True),)
-        self.tp_conv = nn.Sequential(nn.ConvTranspose2d(in_planes//4,
-                                     in_planes//4, kernel_size, stride,
+        self.tp_conv = nn.Sequential(nn.ConvTranspose2d(in_planes // 4,
+                                     in_planes // 4, kernel_size, stride,
                                      padding, output_padding, bias=bias),
-                                     nn.BatchNorm2d(in_planes//4),
+                                     nn.BatchNorm2d(in_planes // 4),
                                      nn.ReLU(inplace=True),)
-        self.conv2 = nn.Sequential(nn.Conv2d(in_planes//4, out_planes, 1, 1, 0,
+        self.conv2 = nn.Sequential(nn.Conv2d(in_planes // 4, out_planes, 1, 1, 0,
                                    bias=bias),
                                    nn.BatchNorm2d(out_planes),
                                    nn.ReLU(inplace=True),)
