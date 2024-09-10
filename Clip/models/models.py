@@ -2,7 +2,20 @@ import torch
 import torch.nn as nn
 from typing import Optional
 import numpy as np
-from image_encoder_backbone import vit as main_model, multi_fusion as fusion_model
+from image_encoder_backbone import vit as main_model, multi_fusion as fusion_model, pretrained_vit
+
+
+def return_pretrained_model(model_name):
+    pretrained_model = {
+        # pretrained text model
+
+        # pretrained vision model
+        "ViT-B/16": [pretrained_vit.vit_b_16, 196, 768],
+        "ViT-B/32": [pretrained_vit.vit_b_32, 49, 768],
+        "ViT-L/16": [pretrained_vit.vit_l_16, 196, 1024],
+        "ViT-L/32": [pretrained_vit.vit_l_32, 49, 1024]
+    }
+    return pretrained_model[model_name]
 
 
 class CLIP(nn.Module):
@@ -11,12 +24,14 @@ class CLIP(nn.Module):
         num_img_modalities: int,
         embed_dim: int,
         # vision
+        vision_pretrained: dict,
         image_size: int,
         patch_size: int,
         vision_channels: int,
         vision_layers: int,
         vision_hidden_dim: int,
         # text
+        text_pretrained: dict,
         context_length: int,
         vocab_size: int,
         text_layers: int,
@@ -30,30 +45,47 @@ class CLIP(nn.Module):
     ):
         super().__init__()
         self.context_length = context_length
+        self.vision_pretrained = vision_pretrained
+        self.text_pretrained = text_pretrained
 
         # set up encoder for images
         torch._assert(vision_hidden_dim % 64 == 0,
                       f"vision hidden dimension {vision_hidden_dim} indivisble by 64")
         vision_heads = vision_hidden_dim // 64
-        self.vision_encoder = nn.ModuleList([
-            main_model.ViT(
-                image_size=image_size,
-                patch_size=patch_size,
-                num_channels=vision_channels,
-                num_layers=vision_layers,
-                num_heads=vision_heads,
-                hidden_dim=vision_hidden_dim,
-                dropout=dropout,
-                attention_dropout=attn_dropout,
-                output_patches=output_patches if output_patches is not None else None
-            ) for _ in range(num_img_modalities)
-        ])
+        self.output_patches = output_patches
+        self.vision_hidden_dim = vision_hidden_dim
+        if vision_pretrained["pretrained"]:
+            model_info = return_pretrained_model(
+                vision_pretrained["model_name"])
+            # Load the pre-trained model
+            pretrained_model = model_info[0](weights=None)
+            state_dict = torch.load(
+                vision_pretrained["model_path"], weights_only=True)
+            pretrained_model.load_state_dict(state_dict, strict=False)
+            self.vision_encoder = nn.ModuleList(
+                [pretrained_model for _ in range(num_img_modalities)])
+            self.output_patches = model_info[1]
+            self.vision_hidden_dim = model_info[2]
+        else:
+            self.vision_encoder = nn.ModuleList([
+                main_model.ViT(
+                    image_size=image_size,
+                    patch_size=patch_size,
+                    num_channels=vision_channels,
+                    num_layers=vision_layers,
+                    num_heads=vision_heads,
+                    hidden_dim=vision_hidden_dim,
+                    dropout=dropout,
+                    attention_dropout=attn_dropout,
+                    output_patches=output_patches if output_patches is not None else None
+                ) for _ in range(num_img_modalities)
+            ])
 
         # set up fusion model
         self.vision_fusion = fusion_model.FeatureFusion(
-            num_patches=output_patches + 1 if output_patches is not None else (
+            num_patches=self.output_patches + 1 if self.output_patches is not None else (
                 (image_size // patch_size) ** 2 + 1),
-            num_dim=vision_hidden_dim,
+            num_dim=self.vision_hidden_dim,
             output_dim=embed_dim,
             dropout=dropout
         )
@@ -174,6 +206,7 @@ def convert_weights(model: nn.Module):
     """Convert applicable model parameters to fp16"""
 
     def _convert_weights_to_fp16(layer):
+
         if isinstance(layer, (nn.Conv1d, nn.Conv2d, nn.Linear)):
             layer.weight.data = layer.weight.data.half()
             if layer.bias is not None:

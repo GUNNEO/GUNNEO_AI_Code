@@ -17,7 +17,7 @@ class BatchNorm(nn.BatchNorm1d):
 
     def forward(self, x: torch.Tensor):
         orig_type = x.dtype
-        # inherit the forward method from torch.nn.BatchNorm3d
+        # inherit the forward method from torch.nn.BatchNorm1d
         ret = super().forward(x.type(torch.float32))
         return ret.type(orig_type)
 

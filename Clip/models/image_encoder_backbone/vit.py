@@ -5,13 +5,14 @@ import torch
 import torch.nn as nn
 
 
-class ConvStemConfig(NamedTuple):
-    out_channels: int
-    kernel_size: int
-    stride: int
-    # indicates it can accept ant type of input and return nn.Module
-    norm_layer: Callable[..., nn.Module] = nn.BatchNorm2d
-    activation_layer: Callable[..., nn.Module] = nn.ReLU
+class BatchNorm2d(nn.BatchNorm2d):
+    '''Temporarily convert precision to fp32'''
+
+    def forward(self, x: torch.Tensor):
+        orig_type = x.dtype
+        # inherit the forward method from torch.nn.BatchNorm2d
+        ret = super().forward(x.type(torch.float32))
+        return ret.type(orig_type)
 
 
 class LayerNorm(nn.LayerNorm):
@@ -27,6 +28,15 @@ class LayerNorm(nn.LayerNorm):
 class QuickGELU(nn.Module):
     def forward(self, x: torch.Tensor):
         return x * torch.sigmoid(1.702 * x)
+
+
+class ConvStemConfig(NamedTuple):
+    out_channels: int
+    kernel_size: int
+    stride: int
+    # indicates it can accept ant type of input and return nn.Module
+    norm_layer: Callable[..., nn.Module] = BatchNorm2d
+    activation_layer: Callable[..., nn.Module] = QuickGELU
 
 
 class EncoderBlock(nn.Module):
@@ -175,8 +185,14 @@ class ViT(nn.Module):
         mlp_dim = hidden_dim * 4
         self.ln_1 = LayerNorm(self.hidden_dim)
 
-        self.encoder = Encoder(num_layers=self.num_layers, num_heads=self.num_heads, hidden_dim=hidden_dim,
-                               mlp_dim=mlp_dim, dropout=self.dropout, attention_dropout=self.attention_dropout)
+        self.encoder = Encoder(
+            num_layers=self.num_layers,
+            num_heads=self.num_heads,
+            hidden_dim=hidden_dim,
+            mlp_dim=mlp_dim,
+            dropout=self.dropout,
+            attention_dropout=self.attention_dropout
+        )
 
         # (n, hidden_dim, num_patches) -> (n, hidden_dim, output_patches)
         self.linear = nn.Linear(num_patches - 1, self.output_patches)
