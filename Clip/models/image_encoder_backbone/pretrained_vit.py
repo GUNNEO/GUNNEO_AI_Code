@@ -12,7 +12,7 @@ from torchvision.utils import _log_api_usage_once
 from torchvision.models._api import register_model, Weights, WeightsEnum
 from torchvision.models._meta import _IMAGENET_CATEGORIES
 from torchvision.models._utils import _ovewrite_named_param, handle_legacy_interface
-
+from utils import LayerNorm, BatchNorm2d, QuickGELU
 
 __all__ = [
     "VisionTransformer",
@@ -27,31 +27,6 @@ __all__ = [
     "vit_l_32",
     "vit_h_14",
 ]
-
-
-class LayerNorm(nn.LayerNorm):
-    '''Temporarily convert precision to fp32'''
-
-    def forward(self, x: torch.Tensor):
-        orig_type = x.dtype
-        # inherit the forward method from torch.nn.LayerNorm
-        ret = super().forward(x.type(torch.float32))
-        return ret.type(orig_type)
-
-
-class BatchNorm2d(nn.BatchNorm2d):
-    '''Temporarily convert precision to fp32'''
-
-    def forward(self, x: torch.Tensor):
-        orig_type = x.dtype
-        # inherit the forward method from torch.nn.BatchNorm2d
-        ret = super().forward(x.type(torch.float32))
-        return ret.type(orig_type)
-
-
-class QuickGELU(nn.Module):
-    def forward(self, x: torch.Tensor):
-        return x * torch.sigmoid(1.702 * x)
 
 
 class ConvStemConfig(NamedTuple):

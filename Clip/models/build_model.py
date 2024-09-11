@@ -1,5 +1,5 @@
 import torch
-import models
+import models_info
 from pathlib import Path
 import urllib
 from tqdm import tqdm
@@ -127,16 +127,8 @@ def load_clip(
         params["vision_pretrained"]["model_name"] = name
         params["vision_pretrained"]["model_path"] = model_path
         params["vision_channels"] = 3
-    model = models.CLIP(num_img_modalities=num_img_modalities, **params)
+    model = models_info.CLIP(num_img_modalities=num_img_modalities, **params)
     model.to(device)
-    models.convert_weights(model)
+    models_info.convert_weights(model)
     model.eval()
     return model
-
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-image = torch.randn(4, 20, 3, 224, 224).to(device)
-text = torch.randint(0, 49408, (20, 77)).to(device)
-model = load_clip(num_img_modalities=4, pretrained=True)
-i, t = model(image, text)
-print(i.shape, t.shape)

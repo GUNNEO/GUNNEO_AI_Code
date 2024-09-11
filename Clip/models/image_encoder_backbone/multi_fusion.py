@@ -1,30 +1,6 @@
 import torch
 import torch.nn as nn
-
-
-class LayerNorm(nn.LayerNorm):
-    '''Temporarily convert precision to fp32'''
-
-    def forward(self, x: torch.Tensor):
-        orig_type = x.dtype
-        # inherit the forward method from torch.nn.LayerNorm
-        ret = super().forward(x.type(torch.float32))
-        return ret.type(orig_type)
-
-
-class BatchNorm(nn.BatchNorm1d):
-    '''Temporarily convert precision to fp32'''
-
-    def forward(self, x: torch.Tensor):
-        orig_type = x.dtype
-        # inherit the forward method from torch.nn.BatchNorm1d
-        ret = super().forward(x.type(torch.float32))
-        return ret.type(orig_type)
-
-
-class QuickGELU(nn.Module):
-    def forward(self, x: torch.Tensor):
-        return x * torch.sigmoid(1.702 * x)
+from utils import LayerNorm, BatchNorm1d, QuickGELU
 
 
 # element-wise summation, element-wise product, element-wise maximum
@@ -44,8 +20,8 @@ class FeatureFusion(nn.Module):
         self.linear_1 = nn.Linear(self.num_patches * 3, self.num_patches)
         self.linear_2 = nn.Linear(self.num_patches, self.num_patches * 3)
         self.gelu = QuickGELU()
-        self.bn_1 = BatchNorm(self.num_patches)
-        self.bn_2 = BatchNorm(self.num_patches * 3)
+        self.bn_1 = BatchNorm1d(self.num_patches)
+        self.bn_2 = BatchNorm1d(self.num_patches * 3)
         self.ln = LayerNorm(self.num_dim)
         self.dropout = nn.Dropout(dropout)
         scale = num_dim ** -0.5
