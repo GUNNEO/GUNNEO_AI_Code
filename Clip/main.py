@@ -21,11 +21,15 @@ modalities = ["T1", "T2"]
 # teporally used for test model function
 input_path = "/Users/gunneo/Downloads/乳腺癌北院_1.csv"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-image = torch.randn(1, 5, 3, 224, 224).to(device)
+image = torch.randn(1, 2, 3, 224, 224).to(device)
 id, text = text_preprocessing.read_text_data(
     input_path, "影像号", "mri diagnosis report")
-model = build.load_clip(num_img_modalities=2, pretrained=True)
-text = text_preprocessing.preprocess_text(text[:5], model)
+# text = ["i am good", "boy is a man", "yes, it is me",
+#         "my name is gbionlp/bluebert_pubmed_mimic_uncased_L-24_H-1024_A-16unneo", "lego toys"]
+model = build.load_clip(num_img_modalities=1,
+                        text_pretrained=True, vision_pretrained=True)
+text, mask = text_preprocessing.preprocess_text(
+    texts=text[:2], model=model, pretrained="BlueBERT-L")
 print(text.shape)
-i, t = model(image, text)
+i, t = model(image, text, mask)
 print(i.shape, t.shape)

@@ -113,12 +113,14 @@ class ViT(nn.Module):
         dropout: float = 0.0,
         attention_dropout: float = 0.0,
         output_patches: Optional[int] = None,
-        conv_stem_config: Optional[List[ConvStemConfig]] = None
+        conv_stem_configs: Optional[List[ConvStemConfig]] = None
     ):
         super().__init__()
         num_patches = (image_size // patch_size) ** 2 + 1
         torch._assert(image_size % patch_size == 0,
                       f'image size {image_size} indivisable by patch size {patch_size}')
+        torch._assert(isinstance(conv_stem_configs, ConvStemConfig),
+                      "input conv configuration is not supperted")
         if output_patches is not None:
             torch._assert((num_patches - 1) % output_patches == 0,
                           f"output_patches {output_patches} indivisable by the number of patches {num_patches - 1}")
@@ -132,10 +134,10 @@ class ViT(nn.Module):
         self.attention_dropout = attention_dropout
 
         # define the pre_cov for specific input
-        if conv_stem_config is not None:
+        if conv_stem_configs is not None:
             prev_channels = num_channels
             seq_proj = nn.Sequential()
-            for i, conv_stem_layer_config in enumerate(conv_stem_config):
+            for i, conv_stem_layer_config in enumerate(conv_stem_configs):
                 seq_proj.add_module(f"conv_bn_relu{i}",
                                     Conv2dNormActivation(in_channels=prev_channels,
                                                          out_channels=conv_stem_layer_config.out_channels,

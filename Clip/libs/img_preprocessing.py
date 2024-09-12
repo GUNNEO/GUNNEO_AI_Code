@@ -94,7 +94,13 @@ def cal_img_distribution(
     file.close()
 
 
-def convert_nii2nii(input_path, output_path, modality, target_dim=224, method='nearest'):
+def convert_nii2nii(
+    input_path: str,
+    output_path: str,
+    modality: str,
+    target_dim: int = 224,
+    method: str = 'nearest'
+):
     input_path = p(input_path)
     output_path = p(output_path)
     output_path = output_path / modality
@@ -114,11 +120,14 @@ def convert_nii2nii(input_path, output_path, modality, target_dim=224, method='n
                 new_img_arr[i] = cropped_img
             new_nii = nibabel.Nifti1Image(new_img_arr, affine=np.eye(4))
             # use dir name to specify unique id
-            saved_path = output_path / f"{modality}-{dir_name[-15:-7]}.nii.gz"
+            saved_path = output_path / f"{modality}-{dir_name}.nii.gz"
             nibabel.save(new_nii, saved_path)
 
 
-def cal_mean_std(input_path, batch_size=64):
+def cal_mean_std(
+    input_path: str,
+    batch_size: int = 64
+):
     transform = transforms.Compose([
         transforms.ToTensor()
     ])

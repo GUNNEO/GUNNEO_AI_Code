@@ -1,13 +1,17 @@
 import torch
 import torch.nn as nn
-from typing import Optional
+from typing import Optional, List
 import numpy as np
+from transformers import BertModel, BertConfig
 from image_encoder_backbone import vit as main_model, multi_fusion as fusion_model, pretrained_vit
 
 
 def return_pretrained_model(model_name):
     pretrained_model = {
         # pretrained text model
+        "ClinicalBERT": [768],
+        "BlueBERT-B": [768],
+        "BlueBERT-L": [1024],
 
         # pretrained vision model
         "ViT-B/16": [pretrained_vit.vit_b_16, 196, 768],
@@ -41,9 +45,11 @@ class CLIP(nn.Module):
         # dropout and optional params
         dropout: float = 0.1,
         attn_dropout: float = 0.1,
-        output_patches: Optional[int] = None
+        output_patches: Optional[int] = None,
+        conv_stem_configs: Optional[List[main_model.ConvStemConfig]] = None
     ):
         super().__init__()
+        self.num_img_modalities = num_img_modalities
         self.context_length = context_length
         self.vision_pretrained = vision_pretrained
         self.text_pretrained = text_pretrained
@@ -77,7 +83,8 @@ class CLIP(nn.Module):
                     hidden_dim=vision_hidden_dim,
                     dropout=dropout,
                     attention_dropout=attn_dropout,
-                    output_patches=output_patches if output_patches is not None else None
+                    output_patches=output_patches if output_patches is not None else None,
+                    conv_stem_configs=conv_stem_configs
                 ) for _ in range(num_img_modalities)
             ])
 
@@ -90,30 +97,46 @@ class CLIP(nn.Module):
             dropout=dropout
         )
 
-        # set up text trnsformer
-        self.vocab_size = vocab_size
-        # convert single token into a fixed length vector(length: text_hidden_dim)
-        self.token_embedding = nn.Embedding(self.vocab_size, text_hidden_dim)
-        self.position_embedding = nn.Parameter(
-            torch.empty(self.context_length, text_hidden_dim))
-        self.ln_final = main_model.LayerNorm(text_hidden_dim)
-        self.text_projection = nn.Parameter(
-            torch.empty(text_hidden_dim, embed_dim))
+        if self.text_pretrained["pretrained"]:
+            config_file = self.text_pretrained["config_path"]
+            state_dict = torch.load(
+                self.text_pretrained["model_path"], weights_only=True)
+            config = BertConfig.from_json_file(config_file)
+            self.text_transformer = BertModel(config)
+            self.text_transformer.load_state_dict(state_dict, strict=False)
+            text_hidden_dim = return_pretrained_model(
+                self.text_pretrained["model_name"])[0]
+            self.ln_final = main_model.LayerNorm(text_hidden_dim)
+            self.text_projection = nn.Parameter(
+                torch.empty(text_hidden_dim, embed_dim))
+        else:
+            # set up text trnsformer
+            self.vocab_size = vocab_size
+            # convert single token into a fixed length vector(length: text_hidden_dim)
+            self.token_embedding = nn.Embedding(
+                self.vocab_size, text_hidden_dim)
+            self.position_embedding = nn.Parameter(
+                torch.empty(self.context_length, text_hidden_dim))
+            self.ln_final = main_model.LayerNorm(text_hidden_dim)
+            self.text_projection = nn.Parameter(
+                torch.empty(text_hidden_dim, embed_dim))
+
+            self.text_transformer = main_model.Encoder(
+                num_layers=text_layers,
+                num_heads=text_headers,
+                hidden_dim=text_hidden_dim,
+                mlp_dim=text_hidden_dim * 4,
+                dropout=dropout,
+                attention_dropout=attn_dropout,
+                attn_mask=self.attn_mask()
+            )
+
         # scale params
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
 
-        self.text_transformer = main_model.Encoder(
-            num_layers=text_layers,
-            num_heads=text_headers,
-            hidden_dim=text_hidden_dim,
-            mlp_dim=text_hidden_dim * 4,
-            dropout=dropout,
-            attention_dropout=attn_dropout,
-            attn_mask=self.attn_mask()
-        )
-
         # init weights for better optimazation
-        self.initialize_parameters()
+        if not self.text_pretrained["pretrained"]:
+            self.initialize_parameters()
 
     def attn_mask(self):
         mask = torch.empty(self.context_length, self.context_length)
@@ -170,13 +193,19 @@ class CLIP(nn.Module):
         return x
 
     def forward(
-            self,
-            images: torch.Tensor,
-            text: torch.Tensor
+        self,
+        images: torch.Tensor,
+        text: torch.Tensor,
+        mask: Optional[torch.Tensor] = None
     ):
         # image: (m, b, c, h, w)
         torch._assert(len(images.shape) == 5,
                       "the images input not in this form (m, b, c, h, w)")
+        torch._assert(images.shape[0] == self.num_img_modalities,
+                      "the number of input modalities is not equal to the defined number of modalities")
+        if self.vision_pretrained["pretrained"]:
+            torch._assert(
+                images.shape[2] == 3, f"vision pretrained model only accepts 3 channels image, but got {images.shape[2]}")
         multi_image_features = []
         for i in range(len(images)):
             multi_image_features.append(self.encode_image(images[i], i))
@@ -187,7 +216,11 @@ class CLIP(nn.Module):
         image_features = self.vision_fusion(multi_image_features)  # (b d)
 
         # encode text
-        text_features = self.encode_text(text)
+        if self.text_pretrained["pretrained"]:
+            text_features = self.ln_final(self.text_transformer(
+                text, attention_mask=mask).pooler_output) @ self.text_projection
+        else:
+            text_features = self.encode_text(text)
 
         # normalized features
         image_features = image_features / \
