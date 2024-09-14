@@ -3,6 +3,7 @@ from typing import Callable, NamedTuple, Optional
 from torchvision.ops.misc import Conv3dNormActivation
 import torch
 import torch.nn as nn
+import math
 from utils import LayerNorm, BatchNorm3d, QuickGELU
 
 
@@ -123,8 +124,9 @@ class ViT3D(nn.Module):
                       f"image size {image_size} indivisable by image patch {image_patch}")
         torch._assert(frame_size % frame_patch == 0,
                       f"frame size {frame_size} indivisable by frame patch {frame_patch}")
-        torch._assert(isinstance(conv_stem_configs, ConvStemConfig),
-                      "input conv configuration is not supperted")
+        if conv_stem_configs is not None:
+            torch._assert(isinstance(conv_stem_configs, ConvStemConfig),
+                          "input conv configuration is not supperted")
         if output_patches is not None:
             torch._assert((num_patches - 1) % output_patches == 0,
                           f"output_patches indivisable by the number of patches {num_patches - 1}")
@@ -161,7 +163,6 @@ class ViT3D(nn.Module):
             self.conv_proj: nn.Module = nn.Conv3d(in_channels=self.num_channels, out_channels=self.hidden_dim, kernel_size=(
                 self.frame_patch, self.image_patch, self.image_patch), stride=(self.frame_patch, self.image_patch, self.image_patch))
 
-        self.output_patches = num_patches - 1 if output_patches is None else output_patches
         scale = self.hidden_dim ** -0.5
         self.class_token = nn.Parameter(scale * torch.randn(self.hidden_dim))
         self.position_embedding = nn.Parameter(
@@ -180,9 +181,34 @@ class ViT3D(nn.Module):
             attention_dropout=self.attention_dropout
         )
 
-        self.linear = nn.Linear(num_patches - 1, self.output_patches)
+        if self.output_patches is not None:
+            self.linear = nn.Linear(num_patches - 1, self.output_patches)
 
         self.ln_2 = LayerNorm(self.hidden_dim)
+
+        if isinstance(self.conv_proj, nn.Sequential):
+            for name, module in self.conv_proj.named_modules():
+                if isinstance(module, nn.Conv3d):
+                    fan_in = module.in_channels * \
+                        module.kernel_size[0] * \
+                        module.kernel_size[1] * module.kernel_size[2]
+                    nn.init.trunc_normal_(
+                        module.weight, std=math.sqrt(1 / fan_in))
+                    if module.bias is not None:
+                        nn.init.zeros_(module.bias)
+                elif isinstance(module, nn.Conv3d) and 'conv_last' in name:
+                    nn.init.normal_(module.weight, mean=0.0,
+                                    std=math.sqrt(2.0 / module.out_channels))
+                    if module.bias is not None:
+                        nn.init.zeros_(module.bias)
+        else:
+            fan_in = self.conv_proj.in_channels * \
+                self.conv_proj.kernel_size[0] * \
+                self.conv_proj.kernel_size[1] * self.conv_proj.kernel_size[2]
+            nn.init.trunc_normal_(self.conv_proj.weight,
+                                  std=math.sqrt(1 / fan_in))
+            if self.conv_proj.bias is not None:
+                nn.init.zeros_(self.conv_proj.bias)
 
     def _process_input(self, x: torch.Tensor):
         n, c, d, h, w = x.shape
@@ -217,8 +243,10 @@ class ViT3D(nn.Module):
         # centrally focus on the first layer of encoder output, other approches
         # such as linear projection or average pooling can be applied
         # x = self.ln_2(x[:, 0, :])
-        cls_token = x[:, 0, :].unsqueeze(dim=1)
-        linear_x = self.linear(x[:, 1:, :].permute(0, 2, 1)).permute(0, 2, 1)
-        x = torch.cat((cls_token, linear_x), dim=1)
+        if self.output_patches is not None:
+            cls_token = x[:, 0, :].unsqueeze(dim=1)
+            linear_x = self.linear(
+                x[:, 1:, :].permute(0, 2, 1)).permute(0, 2, 1)
+            x = torch.cat((cls_token, linear_x), dim=1)
         x = self.ln_2(x)
         return x

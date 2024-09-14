@@ -2,7 +2,8 @@ import torch
 import torch.nn as nn
 from typing import Optional, List
 import numpy as np
-from transformers import BertModel, BertConfig
+from transformers import BertConfig
+from text_encoder_backbone.modeling_bert import BertModel
 from image_encoder_backbone import vit as main_model, multi_fusion as fusion_model, pretrained_vit
 
 
@@ -50,6 +51,7 @@ class CLIP(nn.Module):
     ):
         super().__init__()
         self.num_img_modalities = num_img_modalities
+        self.vision_channels = vision_channels
         self.context_length = context_length
         self.vision_pretrained = vision_pretrained
         self.text_pretrained = text_pretrained
@@ -64,7 +66,8 @@ class CLIP(nn.Module):
             model_info = return_pretrained_model(
                 vision_pretrained["model_name"])
             # Load the pre-trained model
-            pretrained_model = model_info[0](weights=None)
+            pretrained_model = model_info[0](
+                num_input_channels=vision_channels, weights=None)
             state_dict = torch.load(
                 vision_pretrained["model_path"], weights_only=True)
             pretrained_model.load_state_dict(state_dict, strict=False)
@@ -165,7 +168,8 @@ class CLIP(nn.Module):
 
     @property
     def dtype(self):
-        proj = self.vision_encoder[0].conv_proj
+        proj = self.vision_encoder[0].conv_proj if (self.vision_pretrained["pretrained"] and self.vision_channels == 3) or (
+            not self.vision_pretrained["pretrained"]) else self.vision_encoder[0].modify_conv_proj
         if isinstance(proj, nn.Sequential):
             return proj[-1].weight.dtype
         else:
@@ -198,17 +202,18 @@ class CLIP(nn.Module):
         text: torch.Tensor,
         mask: Optional[torch.Tensor] = None
     ):
-        # image: (m, b, c, h, w)
+        # image: (b, n_m, c, h, w)
         torch._assert(len(images.shape) == 5,
-                      "the images input not in this form (m, b, c, h, w)")
-        torch._assert(images.shape[0] == self.num_img_modalities,
-                      "the number of input modalities is not equal to the defined number of modalities")
-        if self.vision_pretrained["pretrained"]:
-            torch._assert(
-                images.shape[2] == 3, f"vision pretrained model only accepts 3 channels image, but got {images.shape[2]}")
+                      "the images input not in this form (b, n_m, c, h, w)")
+        torch._assert(images.shape[1] == self.num_img_modalities,
+                      f"the number of input modalities is not equal to the defined number of modalities{self.num_img_modalities}, but got {images.shape[1]}")
+        # if self.vision_pretrained["pretrained"]:
+        #     torch._assert(
+        #         images.shape[2] == 3, f"vision pretrained model only accepts 3 channels image, but got {images.shape[2]}")
         multi_image_features = []
-        for i in range(len(images)):
-            multi_image_features.append(self.encode_image(images[i], i))
+        for i in range(self.num_img_modalities):
+            image = images[:, i, :, :, :]
+            multi_image_features.append(self.encode_image(image, i))
         multi_image_features = torch.stack(
             multi_image_features)  # (m, b, n_p, d)
 
@@ -218,7 +223,7 @@ class CLIP(nn.Module):
         # encode text
         if self.text_pretrained["pretrained"]:
             text_features = self.ln_final(self.text_transformer(
-                text, attention_mask=mask).pooler_output) @ self.text_projection
+                text, attention_mask=mask, changed_type=self.dtype).pooler_output) @ self.text_projection
         else:
             text_features = self.encode_text(text)
 

@@ -37,6 +37,39 @@ class ConvStemConfig(NamedTuple):
     activation_layer: Callable[..., nn.Module] = QuickGELU
 
 
+def makeConvStemConfig(
+    num_input_channels: int,
+    hidden_dim: int,
+    patch_size: int,
+    conv_stem_configs: Optional[List[ConvStemConfig]] = None
+):
+    if conv_stem_configs is not None:
+        # As per https://arxiv.org/abs/2106.14881
+        seq_proj = nn.Sequential()
+        prev_channels = num_input_channels
+        for i, conv_stem_layer_config in enumerate(conv_stem_configs):
+            seq_proj.add_module(
+                f"conv_bn_relu_{i}",
+                Conv2dNormActivation(
+                    in_channels=prev_channels,
+                    out_channels=conv_stem_layer_config.out_channels,
+                    kernel_size=conv_stem_layer_config.kernel_size,
+                    stride=conv_stem_layer_config.stride,
+                    norm_layer=conv_stem_layer_config.norm_layer,
+                    activation_layer=conv_stem_layer_config.activation_layer,
+                ),
+            )
+            prev_channels = conv_stem_layer_config.out_channels
+        seq_proj.add_module(
+            "conv_last", nn.Conv2d(
+                in_channels=prev_channels, out_channels=hidden_dim, kernel_size=1)
+        )
+        return seq_proj
+    return nn.Conv2d(
+        in_channels=num_input_channels, out_channels=hidden_dim, kernel_size=patch_size, stride=patch_size
+    )
+
+
 class MLPBlock(MLP):
     """Transformer MLP block."""
 
@@ -171,6 +204,7 @@ class VisionTransformer(nn.Module):
         self,
         image_size: int,
         patch_size: int,
+        num_input_channels: int,
         num_layers: int,
         num_heads: int,
         hidden_dim: int,
@@ -188,6 +222,7 @@ class VisionTransformer(nn.Module):
                       "Input shape indivisible by patch size!")
         self.image_size = image_size
         self.patch_size = patch_size
+        self.num_input_channels = num_input_channels
         self.hidden_dim = hidden_dim
         self.mlp_dim = mlp_dim
         self.attention_dropout = attention_dropout
@@ -195,33 +230,12 @@ class VisionTransformer(nn.Module):
         self.representation_size = representation_size
         self.norm_layer = norm_layer
 
-        if conv_stem_configs is not None:
-            # As per https://arxiv.org/abs/2106.14881
-            seq_proj = nn.Sequential()
-            prev_channels = 3
-            for i, conv_stem_layer_config in enumerate(conv_stem_configs):
-                seq_proj.add_module(
-                    f"conv_bn_relu_{i}",
-                    Conv2dNormActivation(
-                        in_channels=prev_channels,
-                        out_channels=conv_stem_layer_config.out_channels,
-                        kernel_size=conv_stem_layer_config.kernel_size,
-                        stride=conv_stem_layer_config.stride,
-                        norm_layer=conv_stem_layer_config.norm_layer,
-                        activation_layer=conv_stem_layer_config.activation_layer,
-                    ),
-                )
-                prev_channels = conv_stem_layer_config.out_channels
-            seq_proj.add_module(
-                "conv_last", nn.Conv2d(
-                    in_channels=prev_channels, out_channels=hidden_dim, kernel_size=1)
-            )
-            self.conv_proj: nn.Module = seq_proj
+        if num_input_channels == 3:
+            self.conv_proj: Optional[nn.Module, nn.Conv2d] = makeConvStemConfig(
+                num_input_channels=num_input_channels, hidden_dim=hidden_dim, patch_size=patch_size, conv_stem_configs=conv_stem_configs)
         else:
-            self.conv_proj = nn.Conv2d(
-                in_channels=3, out_channels=hidden_dim, kernel_size=patch_size, stride=patch_size
-            )
-
+            self.modify_conv_proj: Optional[nn.Module, nn.Conv2d] = makeConvStemConfig(
+                num_input_channels=num_input_channels, hidden_dim=hidden_dim, patch_size=patch_size, conv_stem_configs=conv_stem_configs)
         seq_length = (image_size // patch_size) ** 2
 
         # Add a class token
@@ -240,21 +254,23 @@ class VisionTransformer(nn.Module):
         )
         self.seq_length = seq_length
 
-        if isinstance(self.conv_proj, nn.Conv2d):
-            # Init the patchify stem
-            fan_in = self.conv_proj.in_channels * \
-                self.conv_proj.kernel_size[0] * self.conv_proj.kernel_size[1]
-            nn.init.trunc_normal_(self.conv_proj.weight,
-                                  std=math.sqrt(1 / fan_in))
-            if self.conv_proj.bias is not None:
-                nn.init.zeros_(self.conv_proj.bias)
-        elif self.conv_proj.conv_last is not None and isinstance(self.conv_proj.conv_last, nn.Conv2d):
-            # Init the last 1x1 conv of the conv stem
-            nn.init.normal_(
-                self.conv_proj.conv_last.weight, mean=0.0, std=math.sqrt(2.0 / self.conv_proj.conv_last.out_channels)
-            )
-            if self.conv_proj.conv_last.bias is not None:
-                nn.init.zeros_(self.conv_proj.conv_last.bias)
+        if num_input_channels != 3:
+            if isinstance(self.modify_conv_proj, nn.Conv2d):
+                # Init the patchify stem
+                fan_in = self.modify_conv_proj.in_channels * \
+                    self.modify_conv_proj.kernel_size[0] * \
+                    self.modify_conv_proj.kernel_size[1]
+                nn.init.trunc_normal_(self.modify_conv_proj.weight,
+                                      std=math.sqrt(1 / fan_in))
+                if self.modify_conv_proj.bias is not None:
+                    nn.init.zeros_(self.modify_conv_proj.bias)
+            elif self.modify_conv_proj.conv_last is not None and isinstance(self.modify_conv_proj.conv_last, nn.Conv2d):
+                # Init the last 1x1 conv of the conv stem
+                nn.init.normal_(
+                    self.modify_conv_proj.conv_last.weight, mean=0.0, std=math.sqrt(2.0 / self.modify_conv_proj.conv_last.out_channels)
+                )
+                if self.modify_conv_proj.conv_last.bias is not None:
+                    nn.init.zeros_(self.modify_conv_proj.conv_last.bias)
 
     def _process_input(self, x: torch.Tensor) -> torch.Tensor:
         n, c, h, w = x.shape
@@ -267,7 +283,10 @@ class VisionTransformer(nn.Module):
         n_w = w // p
 
         # (n, c, h, w) -> (n, hidden_dim, n_h, n_w)
-        x = self.conv_proj(x)
+        if self.num_input_channels == 3:
+            x = self.conv_proj(x)
+        else:
+            x = self.modify_conv_proj(x)
         # (n, hidden_dim, n_h, n_w) -> (n, hidden_dim, (n_h * n_w))
         x = x.reshape(n, self.hidden_dim, n_h * n_w)
 
@@ -294,6 +313,7 @@ class VisionTransformer(nn.Module):
 
 
 def _vision_transformer(
+    num_input_channels: int,
     patch_size: int,
     num_layers: int,
     num_heads: int,
@@ -314,6 +334,7 @@ def _vision_transformer(
     model = VisionTransformer(
         image_size=image_size,
         patch_size=patch_size,
+        num_input_channels=num_input_channels,
         num_layers=num_layers,
         num_heads=num_heads,
         hidden_dim=hidden_dim,
@@ -610,7 +631,7 @@ class ViT_H_14_Weights(WeightsEnum):
 
 @register_model("custom_vit_b_16")
 @handle_legacy_interface(weights=("pretrained", ViT_B_16_Weights.IMAGENET1K_V1))
-def vit_b_16(*, weights: Optional[ViT_B_16_Weights] = None, progress: bool = True, **kwargs: Any) -> VisionTransformer:
+def vit_b_16(*, num_input_channels: Optional[int] = None, weights: Optional[ViT_B_16_Weights] = None, progress: bool = True, **kwargs: Any) -> VisionTransformer:
     """
     Constructs a vit_b_16 architecture from
     `An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale <https://arxiv.org/abs/2010.11929>`_.
@@ -628,9 +649,12 @@ def vit_b_16(*, weights: Optional[ViT_B_16_Weights] = None, progress: bool = Tru
     .. autoclass:: torchvision.models.ViT_B_16_Weights
         :members:
     """
+    if weights is not None:
+        num_input_channels = 3
     weights = ViT_B_16_Weights.verify(weights)
 
     return _vision_transformer(
+        num_input_channels=num_input_channels,
         patch_size=16,
         num_layers=12,
         num_heads=12,
@@ -644,7 +668,7 @@ def vit_b_16(*, weights: Optional[ViT_B_16_Weights] = None, progress: bool = Tru
 
 @register_model("custom_vit_b_32")
 @handle_legacy_interface(weights=("pretrained", ViT_B_32_Weights.IMAGENET1K_V1))
-def vit_b_32(*, weights: Optional[ViT_B_32_Weights] = None, progress: bool = True, **kwargs: Any) -> VisionTransformer:
+def vit_b_32(*, num_input_channels: Optional[int] = None, weights: Optional[ViT_B_32_Weights] = None, progress: bool = True, **kwargs: Any) -> VisionTransformer:
     """
     Constructs a vit_b_32 architecture from
     `An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale <https://arxiv.org/abs/2010.11929>`_.
@@ -662,9 +686,12 @@ def vit_b_32(*, weights: Optional[ViT_B_32_Weights] = None, progress: bool = Tru
     .. autoclass:: torchvision.models.ViT_B_32_Weights
         :members:
     """
+    if weights is not None:
+        num_input_channels = 3
     weights = ViT_B_32_Weights.verify(weights)
 
     return _vision_transformer(
+        num_input_channels=num_input_channels,
         patch_size=32,
         num_layers=12,
         num_heads=12,
@@ -678,7 +705,7 @@ def vit_b_32(*, weights: Optional[ViT_B_32_Weights] = None, progress: bool = Tru
 
 @register_model("custom_vit_l_16")
 @handle_legacy_interface(weights=("pretrained", ViT_L_16_Weights.IMAGENET1K_V1))
-def vit_l_16(*, weights: Optional[ViT_L_16_Weights] = None, progress: bool = True, **kwargs: Any) -> VisionTransformer:
+def vit_l_16(*, num_input_channels: Optional[int] = None, weights: Optional[ViT_L_16_Weights] = None, progress: bool = True, **kwargs: Any) -> VisionTransformer:
     """
     Constructs a vit_l_16 architecture from
     `An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale <https://arxiv.org/abs/2010.11929>`_.
@@ -696,9 +723,12 @@ def vit_l_16(*, weights: Optional[ViT_L_16_Weights] = None, progress: bool = Tru
     .. autoclass:: torchvision.models.ViT_L_16_Weights
         :members:
     """
+    if weights is not None:
+        num_input_channels = 3
     weights = ViT_L_16_Weights.verify(weights)
 
     return _vision_transformer(
+        num_input_channels=num_input_channels,
         patch_size=16,
         num_layers=24,
         num_heads=16,
@@ -712,7 +742,7 @@ def vit_l_16(*, weights: Optional[ViT_L_16_Weights] = None, progress: bool = Tru
 
 @register_model("custom_vit_l_32")
 @handle_legacy_interface(weights=("pretrained", ViT_L_32_Weights.IMAGENET1K_V1))
-def vit_l_32(*, weights: Optional[ViT_L_32_Weights] = None, progress: bool = True, **kwargs: Any) -> VisionTransformer:
+def vit_l_32(*, num_input_channels: Optional[int] = None, weights: Optional[ViT_L_32_Weights] = None, progress: bool = True, **kwargs: Any) -> VisionTransformer:
     """
     Constructs a vit_l_32 architecture from
     `An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale <https://arxiv.org/abs/2010.11929>`_.
@@ -730,9 +760,12 @@ def vit_l_32(*, weights: Optional[ViT_L_32_Weights] = None, progress: bool = Tru
     .. autoclass:: torchvision.models.ViT_L_32_Weights
         :members:
     """
+    if weights is not None:
+        num_input_channels = 3
     weights = ViT_L_32_Weights.verify(weights)
 
     return _vision_transformer(
+        num_input_channels=num_input_channels,
         patch_size=32,
         num_layers=24,
         num_heads=16,
@@ -746,7 +779,7 @@ def vit_l_32(*, weights: Optional[ViT_L_32_Weights] = None, progress: bool = Tru
 
 @register_model("custom_vit_h_14")
 @handle_legacy_interface(weights=("pretrained", None))
-def vit_h_14(*, weights: Optional[ViT_H_14_Weights] = None, progress: bool = True, **kwargs: Any) -> VisionTransformer:
+def vit_h_14(*, num_input_channels: Optional[int] = None, weights: Optional[ViT_H_14_Weights] = None, progress: bool = True, **kwargs: Any) -> VisionTransformer:
     """
     Constructs a vit_h_14 architecture from
     `An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale <https://arxiv.org/abs/2010.11929>`_.
@@ -764,9 +797,12 @@ def vit_h_14(*, weights: Optional[ViT_H_14_Weights] = None, progress: bool = Tru
     .. autoclass:: torchvision.models.ViT_H_14_Weights
         :members:
     """
+    if weights is not None:
+        num_input_channels = 3
     weights = ViT_H_14_Weights.verify(weights)
 
     return _vision_transformer(
+        num_input_channels=num_input_channels,
         patch_size=14,
         num_layers=32,
         num_heads=16,

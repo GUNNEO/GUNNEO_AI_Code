@@ -1,4 +1,6 @@
 import torch
+import torch.nn as nn
+import torch.optim as optim
 import models_info
 from pathlib import Path
 import requests
@@ -73,8 +75,7 @@ def text_pretrained_default_config():
 def vision_pretrained_default_config():
     return {
         "name": "ViT-B/16",
-        "download_root": Path.home() / ".cache" / "clip",
-        "num_channels": 3
+        "download_root": Path.home() / ".cache" / "clip"
     }
 
 
@@ -94,7 +95,9 @@ def clip_default_params():
         "text_layers": 12,
         "text_headers": 8,
         "text_hidden_dim": 768,
-        "output_patches": 49,
+        "dropout": 0.1,
+        "attn_dropout": 0.1,
+        "output_patches": None,
         "conv_stem_configs": None
     }
 
@@ -122,7 +125,10 @@ def load_clip(
 
     # device setting
     device: Union[str,
-                  torch.device] = "cuda" if torch.cuda.is_available() else "cpu"
+                  torch.device] = "cuda" if torch.cuda.is_available() else "cpu",
+
+    # weights conversion
+    weights_conversion: bool = True
 ):
     # load default set up of clip
     if clip_params is None:
@@ -195,11 +201,65 @@ def load_clip(
         clip_params["vision_pretrained"]["pretrained"] = True
         clip_params["vision_pretrained"]["model_name"] = name
         clip_params["vision_pretrained"]["model_path"] = model_path
-        clip_params["vision_channels"] = vision_pretrained_params["num_channels"]
+        if "vision_channels" in vision_pretrained_params.keys():
+            clip_params["vision_channels"] = vision_pretrained_params["vision_channels"]
     model = models_info.CLIP(
         num_img_modalities=num_img_modalities, **clip_params)
     model.to(device)
-    if not text_pretrained:
+    print(f"model is on {device}")
+    if weights_conversion:
         models_info.convert_weights(model)  # convert model's precision to fp16
     model.eval()
     return model
+
+
+def make(
+    make_config: dict,
+    load_clip_config: dict
+):
+    # make the model here
+    model = load_clip(**load_clip_config)
+
+    # construct the criterion and optimizer
+    criterion = nn.CrossEntropyLoss().cuda(load_clip_config["device"])
+    optimizer_flag = make_config["optimizer"]
+    if optimizer_flag == "AdamW":
+        optimizer = optim.AdamW(model.parameters(), lr=make_config["lr"])
+    elif optimizer_flag == "SGD":
+        optimizer = optim.SGD(
+            model.parameters(), lr=make_config["lr"], momentum=make_config["momentum"])
+    else:
+        raise RuntimeError("invalid optimizer configuration")
+    return model, criterion, optimizer
+
+
+def train_batch(
+    images: torch.Tensor,
+    texts: torch.Tensor,
+    model: nn.Module,
+    device: torch.device,
+    criterion: nn.CrossEntropyLoss,
+    optimizer: Union[optim.AdamW, optim.SGD]
+):
+    images, texts = images.to(device), texts.to(device)
+
+    # Forward pass ➡
+    logits_per_image, logits_per_text = model(images, texts)
+
+    # Create labels
+    batch_size = images.shape[0]
+    labels = torch.arange(batch_size).to(device)
+
+    # Compute loss
+    loss_img = criterion(logits_per_image, labels)
+    loss_txt = criterion(logits_per_text, labels)
+    loss = (loss_img + loss_txt) / 2  # avg. img and txt loss
+
+    # Backward pass ⬅
+    optimizer.zero_grad()
+    loss.backward()
+
+    # Step with optimizer
+    optimizer.step()
+
+    return loss
