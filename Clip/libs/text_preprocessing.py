@@ -1,37 +1,9 @@
 import torch
 import torch.nn as nn
-import pandas as pd
-from pathlib import Path
-from typing import List, Union
-from tokenizer import SimpleTokenizer
+from typing import List
+from models.text_encoder_backbone.tokenizer import SimpleTokenizer
 from transformers import AutoTokenizer
 from typing import Optional
-
-
-def check_path(input_path: str):
-    assert Path(input_path).exists(), f"{input_path} does not exist"
-    assert Path(input_path).is_file(), f"{input_path} is not a file"
-
-
-def read_text_data(
-    text_path: str,
-    id_col: str,
-    text_col: Union[str, List[str]]
-):
-    check_path(text_path)
-    csv_file = pd.read_csv(text_path)
-    id = list(csv_file[id_col])
-    text = list(csv_file[text_col])
-    return id, text
-
-
-def return_img_path(
-    text_path: str,
-    id_col: str,
-    img_col: str
-):
-    check_path(text_path)
-    pass
 
 
 def return_tokenizer(model_name):
