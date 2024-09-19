@@ -1,9 +1,8 @@
 import __init__
 import torch
 import argparse
-import models.build_model as build
-import libs.text_preprocessing as text_preprocessing
 import libs.data_loader as data_loader
+import libs.img_preprocessing as img_utils
 
 
 '''default setting of the model'''
@@ -20,9 +19,8 @@ modalities = ["T1", "T2"]
 
 
 # teporally used for test model function
-text_path = "/Users/gunneo/Downloads/中山二院_单独MR_v5 2_1.csv"
+json_path = "/Users/gunneo/AI/Codes/Clip/datasets/hnscc.json"
+output_path = "/Users/gunneo/AI/Codes/Clip/datasets/normalize_params.txt"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-image = torch.randn(5, 1, 1, 224, 224).to(device)
-data_dict = data_loader.read_data(
-    text_path=text_path, **data_loader.return_hnscc_config())
-print(data_dict[11089028]["img_path"][1])
+img_utils.cal_mean_std(json_file_path=json_path,
+                       modality=1, output_path=output_path)
