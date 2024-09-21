@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data as data
 import argparse
+import platform
 from tqdm import tqdm
 from pathlib import Path
 from typing import Optional, Union
@@ -15,6 +16,7 @@ import libs.text_preprocessing as text_utils
 '''default setting of the model'''
 
 home_path = Path(__file__).parent
+system_name = platform.uname().system
 
 
 def parse_args():
@@ -23,7 +25,7 @@ def parse_args():
     parser.add_argument('--json_file_path', type=str,
                         default=home_path / "datasets/hnscc_sorted.json",
                         help="complete info to load all data")
-    parser.add_argument('--batch_size', type=int, default=2)
+    parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--img_resolution', type=int, default=224)
     parser.add_argument('--img_num_slices', type=int, default=1)
     # setting for clip params
@@ -32,10 +34,13 @@ def parse_args():
                         default=build_model._clip_default_params())
     parser.add_argument('--text_pretrained', type=bool, default=False)
     parser.add_argument('--vision_pretrained', type=bool, default=False)
+    parser.add_argument('--weights_conversion', type=int,
+                        default=system_name in ["Linux", "Windows"])
 
-    parser.add_argument('--epochs', type=int, default=1)
+    parser.add_argument('--epochs', type=int, default=200)
     # record the loss into log envry 10 batches
     parser.add_argument('--log_interval', type=int, default=10)
+    parser.add_argument('--save_interval', type=int, default=2)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--save_dir', type=str, default=home_path / "checkpoints/",
                         help="Directory to save the trained model.")
@@ -65,7 +70,8 @@ def make(
         text_pretrained=config.text_pretrained,
         vision_pretrained=config.vision_pretrained,
         clip_params=config.clip_params,
-        device=device
+        device=device,
+        weights_conversion=config.weights_conversion
     )
 
     # construct the criterion and optimizer
@@ -95,13 +101,12 @@ def train(
         model_save_dir.mkdir(exist_ok=True, parents=True)
 
     # Run training
+    num_batches = len(dataloader)
     example_ct = 0  # number of examples seen
-    batch_ct = 0  # number of batches seen
     report_freq = config.log_interval
-
     for epoch in range(config.epochs):
         running_loss = 0.0  # running loss over batch
-        for batch_idx, sample in enumerate(tqdm(dataloader, desc=f"Epoch {epoch}/{config.epochs}")):
+        for batch_idx, sample in enumerate(tqdm(dataloader, desc=f"Epoch {epoch+1}/{config.epochs}")):
             # get the images
             images = sample["images"]
             # (b, n_m, h, w, d) -> (n_m, b, d, h, w)
@@ -125,16 +130,16 @@ def train(
                 device=device
             )
             example_ct += images.shape[1]
-            batch_ct += 1
             running_loss += loss.item()
 
             # Report metrics every `report_freq` batch
-            if (batch_ct % report_freq) == 0:
+            if ((batch_idx + 1) % report_freq) == 0 or batch_idx == num_batches - 1:
                 train_log(running_loss / report_freq, example_ct, epoch)
                 running_loss = 0.0
 
-            if (batch_ct % config.save_interval) == 0:
-                model_path = Path(model_save_dir) / f"checkpoint_{batch_ct}.pt"
+            if ((epoch + 1) % config.save_interval) == 0:
+                model_path = Path(model_save_dir) / \
+                    f"checkpoint_{epoch+1}.pt"
                 print("Saved checkpoint to: ", model_path)
                 save(model, model_path)
 
@@ -165,13 +170,10 @@ def train_batch(
 
     # Backward pass <-
     optimizer.zero_grad()
-    print(1)
     loss.backward()
-    print(2)
 
     # Step with optimizer
     optimizer.step()
-    print(3)
 
     return loss
 
