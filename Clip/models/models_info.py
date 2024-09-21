@@ -199,14 +199,14 @@ class CLIP(nn.Module):
     def forward(
         self,
         images: torch.Tensor,
-        text: torch.Tensor,
-        mask: Optional[torch.Tensor] = None
+        texts: torch.Tensor,
+        masks: Optional[torch.Tensor] = None
     ):
         # image: (b, n_m, c, h, w)
         torch._assert(len(images.shape) == 5,
                       "the images input not in this form (b, n_m, c, h, w)")
         torch._assert(images.shape[1] == self.num_img_modalities,
-                      f"the number of input modalities is not equal to the defined number of modalities{self.num_img_modalities}, but got {images.shape[1]}")
+                      f"the number of input modalities is not equal to the defined number of modalities {self.num_img_modalities}, but got {images.shape[1]}")
         # if self.vision_pretrained["pretrained"]:
         #     torch._assert(
         #         images.shape[2] == 3, f"vision pretrained model only accepts 3 channels image, but got {images.shape[2]}")
@@ -223,9 +223,9 @@ class CLIP(nn.Module):
         # encode text
         if self.text_pretrained["pretrained"]:
             text_features = self.ln_final(self.text_transformer(
-                text, attention_mask=mask, changed_type=self.dtype).pooler_output) @ self.text_projection
+                texts, attention_mask=masks, changed_type=self.dtype).pooler_output) @ self.text_projection
         else:
-            text_features = self.encode_text(text)
+            text_features = self.encode_text(texts)
 
         # normalized features
         image_features = image_features / \

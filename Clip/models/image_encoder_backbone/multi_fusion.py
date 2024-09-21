@@ -51,6 +51,7 @@ class FeatureFusion(nn.Module):
         # concat the output
         concat_x = torch.cat((summation_x, product_x, maximum_x), dim=1)
 
+        print(concat_x.shape)
         # fusion weights
         x = concat_x.permute(0, 2, 1)
         x = self.linear_1(x).permute(0, 2, 1)

@@ -1,6 +1,4 @@
 import torch
-import torch.nn as nn
-import torch.optim as optim
 import models_info
 from pathlib import Path
 import requests
@@ -64,7 +62,7 @@ def _download(key: str, url: str, root: str):
     return download_target
 
 
-def text_pretrained_default_config():
+def _text_pretrained_default_config():
     return {
         "name": "ClinicalBERT",
         "download_root": Path.home() / ".cache" / "clip",
@@ -72,14 +70,14 @@ def text_pretrained_default_config():
     }
 
 
-def vision_pretrained_default_config():
+def _vision_pretrained_default_config():
     return {
         "name": "ViT-B/16",
         "download_root": Path.home() / ".cache" / "clip"
     }
 
 
-def clip_default_params():
+def _clip_default_params():
     return {
         # params for clip model
         "embed_dim": 256,
@@ -132,26 +130,27 @@ def load_clip(
 ):
     # load default set up of clip
     if clip_params is None:
-        clip_params = clip_default_params()
+        clip_params = _clip_default_params()
     else:
         # check keys
-        default_keys = set(clip_default_params().keys())
+        default_keys = set(_clip_default_params().keys())
         input_keys = set(clip_params.keys())
         torch._assert(default_keys == input_keys,
                       f"params are not supported by clip, expected keys: {default_keys}, but got {input_keys}")
-        check_keys_type(default_keys, input_keys)
+        check_keys_type(_clip_default_params(), clip_params)
 
     # load text pretrained model configuration if text_pretrained is set to True
     if text_pretrained:
         if text_pretrained_params is None:
-            text_pretrained_params = text_pretrained_default_config()
+            text_pretrained_params = _text_pretrained_default_config()
         else:
             default_pretrained_keys = set(
-                text_pretrained_default_config().keys())
+                _text_pretrained_default_config().keys())
             input_pretrained_keys = set(text_pretrained_params.keys())
             torch._assert(default_pretrained_keys == input_pretrained_keys,
                           f"text_pretrained_params not supported, expected keys: {default_pretrained_keys}, but got {input_pretrained_keys}")
-            check_keys_type(default_pretrained_keys, input_pretrained_keys)
+            check_keys_type(_text_pretrained_default_config(),
+                            text_pretrained_params)
 
         # download pretrained model
         name = text_pretrained_params["name"]
@@ -179,14 +178,15 @@ def load_clip(
     # load vision pretrained model configuration if vision_pretrained is set to True
     if vision_pretrained:
         if vision_pretrained_params is None:
-            vision_pretrained_params = vision_pretrained_default_config()
+            vision_pretrained_params = _vision_pretrained_default_config()
         else:
             default_pretrained_keys = set(
-                vision_pretrained_default_config().keys())
+                _vision_pretrained_default_config().keys())
             input_pretrained_keys = set(vision_pretrained_params.keys())
             torch._assert(default_pretrained_keys == input_pretrained_keys,
                           f"vision_pretrained_params not supported, expected keys: {default_pretrained_keys}, but got {input_pretrained_keys}")
-            check_keys_type(default_pretrained_keys, input_pretrained_keys)
+            check_keys_type(_vision_pretrained_default_config(),
+                            vision_pretrained_params)
 
         # download pretrained model
         name = vision_pretrained_params["name"]
@@ -211,55 +211,3 @@ def load_clip(
         models_info.convert_weights(model)  # convert model's precision to fp16
     model.eval()
     return model
-
-
-def make(
-    make_config: dict,
-    load_clip_config: dict
-):
-    # make the model here
-    model = load_clip(**load_clip_config)
-
-    # construct the criterion and optimizer
-    criterion = nn.CrossEntropyLoss().cuda(load_clip_config["device"])
-    optimizer_flag = make_config["optimizer"]
-    if optimizer_flag == "AdamW":
-        optimizer = optim.AdamW(model.parameters(), lr=make_config["lr"])
-    elif optimizer_flag == "SGD":
-        optimizer = optim.SGD(
-            model.parameters(), lr=make_config["lr"], momentum=make_config["momentum"])
-    else:
-        raise RuntimeError("invalid optimizer configuration")
-    return model, criterion, optimizer
-
-
-def train_batch(
-    images: torch.Tensor,
-    texts: torch.Tensor,
-    model: nn.Module,
-    device: torch.device,
-    criterion: nn.CrossEntropyLoss,
-    optimizer: Union[optim.AdamW, optim.SGD]
-):
-    images, texts = images.to(device), texts.to(device)
-
-    # Forward pass ➡
-    logits_per_image, logits_per_text = model(images, texts)
-
-    # Create labels
-    batch_size = images.shape[0]
-    labels = torch.arange(batch_size).to(device)
-
-    # Compute loss
-    loss_img = criterion(logits_per_image, labels)
-    loss_txt = criterion(logits_per_text, labels)
-    loss = (loss_img + loss_txt) / 2  # avg. img and txt loss
-
-    # Backward pass ⬅
-    optimizer.zero_grad()
-    loss.backward()
-
-    # Step with optimizer
-    optimizer.step()
-
-    return loss

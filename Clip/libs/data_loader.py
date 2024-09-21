@@ -1,52 +1,36 @@
-import pandas as pd
-from pathlib import Path
+import numpy as np
 import torch
 from torch.utils import data
-import shutil
 import json
 import nibabel
-from typing import List, Optional
+from typing import Optional
+from pathlib import Path
 from torchvision.transforms import Compose, Normalize, transforms
-import libs.img_preprocessing as img_utils
-import libs.text_preprocessing as text_utils
 
 
-def check_file_path(
-    input_path: str
-):
-    assert Path(input_path).exists(), f"{input_path} does not exist"
-    assert Path(input_path).is_file(), f"{input_path} is not a file"
-
-
-def check_dir_path(
-    input_path: str
-):
-    assert Path(input_path).exists(), f"{input_path} does not exist"
-    assert Path(input_path).is_dir(), f"{input_path} is not a directory"
-
-
-def return_normalize_params(
+def _return_normalize_params(
     num_slices: int,
     modality: int
 ):
     means_modalities = [150.63895616116818, 124.80986430358928]
     stds_modalities = [91.48943914806172, 114.07748472505894]
+    mean = [means_modalities[modality]] * num_slices
+    std = [stds_modalities[modality]] * num_slices
     return Compose([
-        Normalize((means_modalities[modality] for _ in range(
-            num_slices)), (stds_modalities[modality] for _ in range(num_slices))),
-        transforms.ToTensor()
+        transforms.ToTensor(),
+        Normalize(mean=mean, std=std)
     ])
 
 
+# build for vit2d model
 class PCDataset(data.Dataset):
     def __init__(
         self,
         json_file_path: str,
         img_num_slices: int,
-        tokenizer: str,
-        transforms: Optional[str] = None
+        transforms: Optional[callable] = None
     ):
-        super.__init__()
+        super().__init__()
         with open(json_file_path, "r", encoding="utf-8") as json_file:
             self.data_dict = json.load(json_file)
         self.img_num_slices = img_num_slices
@@ -56,6 +40,7 @@ class PCDataset(data.Dataset):
         return len(self.data_dict)
 
     def __getitem__(self, id):
+        id = str(id)
         img_paths = self.data_dict[id]["img_path"]
         images = []
         for index, img_path in enumerate(img_paths):
@@ -63,9 +48,9 @@ class PCDataset(data.Dataset):
                 Path(img_path) / "new.nii.gz").get_fdata()
             # slice the image, image shape: (h, w, d)
             d = image.shape[2]
-            start = (d - self.img_num_slices) // 2
-            end = start + self.img_num_slices
-            image = image[:, :, start:end]
+            indices = np.linspace(0, d - 1, num=self.img_num_slices, dtype=int)
+            indices = np.clip(indices, 0, d - 1)
+            image = image[:, :, indices]
             if self.transforms:
                 transform = self.transforms(
                     num_slices=self.img_num_slices, modality=index)
@@ -82,66 +67,50 @@ class PCDataset(data.Dataset):
         return sample
 
 
-def load_data():
-    pass
+def load_data(
+    json_file_path: str,
+    batch_size: int = 4,
+    img_resolution: Optional[int] = None,
+    img_num_slices: int = 6,
+    pretrained: bool = False,
+    verbose: bool = False
+):
+    if torch.cuda.is_available():
+        dev = "cuda"
+        cuda_available = True
+        print('using CUDA to load data')
+    else:
+        dev = "cpu"
+        cuda_available = False
+        print('Using cpu to load data')
 
+    device = torch.device(dev)
 
-# config for csv data
-def return_hnscc_config():
-    return {
-        "id_col": "影像号",
-        "img_cols": [("T1CA", -3), ("T2A", -3)],
-        "report_cols": ["mri diagnosis report"]
+    if cuda_available:
+        torch.cuda.set_device(device)
+
+    if pretrained:
+        img_resolution = 224
+    else:
+        img_resolution = img_resolution if img_resolution is not None else 224
+    img_transforms = _return_normalize_params
+
+    torch_dset = PCDataset(json_file_path=json_file_path,
+                           img_num_slices=img_num_slices, transforms=img_transforms)
+
+    # show basic info of data
+    if verbose:
+        for i in range(len(torch_dset)):
+            sample = torch_dset[i]
+            print(i, sample['images'].size(), sample['texts'])
+            if i == 3:
+                break
+
+    loader_params = {
+        'batch_size': batch_size,
+        'shuffle': True,
+        'num_workers': 0
     }
 
-
-def read_csv_data(
-    text_path: str,
-    id_col: str,
-    img_cols: List[str],
-    report_cols: List[str]
-):
-    check_file_path(text_path)
-    csv_file = pd.read_csv(text_path)
-    dict = {}
-
-    for _, row in csv_file.iterrows():
-        row_id = row[id_col]
-        dict[row_id] = {
-            "img_path": ["/".join(row[img_col[0]].split("/")[img_col[1]:]) for img_col in img_cols],
-            "report": [row[report_col] for report_col in report_cols]
-        }
-    return dict
-
-
-def mv_file(
-    data_dict: dict,
-    ori_path: str,
-    new_path: str
-):
-    json_output_path = Path(__file__).parent.parent / "datasets/hnscc.json"
-    for key, value in data_dict.items():
-        img_paths = value["img_path"]
-        for index, img_path in enumerate(img_paths):
-            ori_img_path = Path(ori_path) / img_path
-            check_dir_path(ori_img_path)
-            new_img_path = Path(new_path) / img_path
-            shutil.copytree(ori_img_path, new_img_path, dirs_exist_ok=True)
-            # update new img_path here
-            data_dict[key]["img_path"][index] = str(new_img_path)
-    with open(json_output_path, 'w', encoding='utf-8') as json_file:
-        json.dump(data_dict, json_file, ensure_ascii=False, indent=4)
-
-
-def process_img(
-    json_file_path: str
-):
-    check_file_path(json_file_path)
-    with open(json_file_path, 'r', encoding='utf-8') as json_file:
-        data_dict = json.load(json_file)
-    for key, value in data_dict.items():
-        img_paths = value["img_path"]
-        for index, img_path in enumerate(img_paths):
-            check_dir_path(img_path)
-            img_utils.convert_dcm2nii(
-                input_path=img_path, output_path=img_path + "/new.nii.gz")
+    data_loader = data.DataLoader(torch_dset, **loader_params)
+    return data_loader, device
