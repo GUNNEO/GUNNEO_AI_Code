@@ -3,8 +3,10 @@ import numpy as np
 import cv2
 import nibabel
 import pydicom
+from pydicom.errors import InvalidDicomError
 from pathlib import Path as p
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 
 '''the input of the img should be a np.ndarray'''
@@ -48,22 +50,42 @@ def _smart_crop(
     return cropped_img
 
 
+def _convert_uname2dicom(
+    folder_path: str
+):
+    folder_path = Path(folder_path)
+    for dicom_folder in folder_path.iterdir():
+        if dicom_folder.is_dir():
+            for file_path in dicom_folder.rglob('*'):
+                if file_path.is_file() and file_path.suffix == '':
+                    new_file_path = file_path.with_suffix('.dcm')
+                    file_path.rename(new_file_path)
+
+
 def _load_dicom_files(
     dicom_dir: str
 ):
     dicom_dir = p(dicom_dir)
     dicom_files = sorted(
         [f for f in dicom_dir.iterdir() if f.suffix == '.dcm'])
-    slices = [pydicom.dcmread(str(dicom_file)) for dicom_file in dicom_files]
+    try:
+        slices = [pydicom.dcmread(str(dicom_file))
+                  for dicom_file in dicom_files]
+    except (InvalidDicomError, FileNotFoundError, IsADirectoryError):
+        raise RuntimeError(f"can not load {dicom_dir}")
     slices.sort(key=lambda x: float(x.ImagePositionPatient[2]))
     return slices
 
 
 def _dicom_to_numpy(
+    input_path: str,
     dicom_slices: list,
 ):
     pixel_arrays = [s.pixel_array for s in dicom_slices]
-    image_3d = np.stack(pixel_arrays, axis=-1)
+    try:
+        image_3d = np.stack(pixel_arrays, axis=-1)
+    except (ValueError, TypeError):
+        raise RuntimeError(f"error shape, path: {input_path}")
 
     intercept = dicom_slices[0].RescaleIntercept if 'RescaleIntercept' in dicom_slices[0] else 0
     slope = dicom_slices[0].RescaleSlope if 'RescaleSlope' in dicom_slices[0] else 1
@@ -109,8 +131,9 @@ def convert_dcm2nii(
     target_dim: int = 224,
     method: str = "nearest"
 ):
-    dicom_slices = _load_dicom_files(input_path)
-    image_3d = _dicom_to_numpy(dicom_slices)
+    dicom_slices = _load_dicom_files(dicom_dir=input_path)
+    image_3d = _dicom_to_numpy(
+        input_path=input_path, dicom_slices=dicom_slices)
     processed_image_3d = _process_image_3d(
         image_3d=image_3d, target_dim=target_dim, method=method)
     _save_as_nii(image_3d=processed_image_3d, output_path=output_path,

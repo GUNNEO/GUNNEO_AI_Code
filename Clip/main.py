@@ -17,13 +17,14 @@ import libs.text_preprocessing as text_utils
 
 home_path = Path(__file__).parent
 system_name = platform.uname().system
+json_path = None
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="config for model")
     # setting for data loader
     parser.add_argument('--json_file_path', type=str,
-                        default=home_path / "datasets/hnscc_sorted.json",
+                        default=home_path / "datasets/" / json_path,
                         help="complete info to load all data")
     parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--img_resolution', type=int, default=224)
