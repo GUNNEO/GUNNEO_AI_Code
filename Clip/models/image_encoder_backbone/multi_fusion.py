@@ -28,7 +28,10 @@ class FeatureFusion(nn.Module):
         self.final_weight = nn.Parameter(
             scale * torch.randn(self.num_dim, self.output_dim))
 
-    def forward(self, x: torch.Tensor):
+    def forward(
+        self,
+        x: torch.Tensor
+    ):
         # element-wise summation
         summation_x = torch.sum(x, dim=0)
         summation_x = torch.squeeze(summation_x, dim=0)

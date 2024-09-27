@@ -48,9 +48,6 @@ class PCDataset(data.Dataset):
                 Path(img_path) / "new.nii.gz").get_fdata()
             # slice the image, image shape: (h, w, d)
             d = image.shape[2]
-            h, w = image.shape[0], image.shape[1]
-            if min(h, w) < 224:
-                print(id)
             indices = np.linspace(0, d - 1, num=self.img_num_slices, dtype=int)
             indices = np.clip(indices, 0, d - 1)
             image = image[:, :, indices]
@@ -111,7 +108,7 @@ def load_data(
 
     loader_params = {
         'batch_size': batch_size,
-        'shuffle': True,
+        'shuffle': False,
         'num_workers': 0
     }
 

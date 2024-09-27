@@ -1,0 +1,37 @@
+rep = []
+        d0 = []
+        d1 = []
+        ds = []
+        for m0 in range(self.num_modalities):
+            s = torch.zeros(x.shape[1], x.shape[2] // 2)
+            c = []
+            d0_m0 = []
+            d1_m0 = []
+            ds_m0 = []
+            for m1, modality_tensor in enumerate(x):
+                e_m1 = self.multi_linear[m0](modality_tensor)
+                s_m1 = self.gelu(
+                    self.bn(e_m1 @ self.params_w[m0] + self.params_b[m0]))
+                attn_m1 = self.tanh(
+                    self.bn(s_m1 @ self.params_attn_w[m0] + self.params_attn_b[m0]))
+                s += attn_m1 * s_m1
+                c_m1 = self.gelu(self.bn(e_m1 @ self.param_w + self.param_b))
+                # the probality of input that does not belong to this modality
+                # means how likely this tensor share some common features
+                d0_prob_m1 = 1 - F.softmax(self.D0[m0](c_m1), dim=1)
+                d0_m0.append(d0_prob_m1)
+                w_m1 = torch.unsqueeze(d0_prob_m1[:, m1], dim=1) * s_m1
+                c.append(w_m1)
+                d1_m0.append(F.softmax(self.D1[m0](w_m1), dim=1))
+                ds_m0.append(F.softmax(self.D1[m0](s_m1), dim=1))
+            d0.append(torch.stack(d0_m0, dim=0))
+            d1.append(torch.stack(d1_m0, dim=0))
+            ds.append(torch.stack(ds_m0, dim=0))
+            c, _ = torch.max(torch.stack(c, dim=0), dim=0)
+            rep.append(s + c)
+        d0 = torch.stack(d0, dim=0)
+        d1 = torch.stack(d1, dim=0)
+        ds = torch.stack(ds, dim=0)
+
+        return sum(rep), d0, d1, ds
+

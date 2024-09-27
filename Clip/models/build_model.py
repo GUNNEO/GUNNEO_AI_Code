@@ -80,7 +80,6 @@ def _vision_pretrained_default_config():
 def _clip_default_params():
     return {
         # params for clip model
-        "embed_dim": 256,
         "vision_pretrained": {"pretrained": False, "model_name": None, "model_path": None},
         "image_size": 224,
         "patch_size": 16,
@@ -96,6 +95,7 @@ def _clip_default_params():
         "dropout": 0.1,
         "attn_dropout": 0.1,
         "output_patches": None,
+        "img_fusion_method": "attn_gan_fusion",
         "conv_stem_configs": None
     }
 
@@ -108,6 +108,7 @@ def check_keys_type(dict1: dict, dict2: dict):
 
 
 def load_clip(
+    num_text_modalities: int,
     num_img_modalities: int,
 
     # pretrained text model specific params
@@ -203,8 +204,8 @@ def load_clip(
         clip_params["vision_pretrained"]["model_path"] = model_path
         if "vision_channels" in vision_pretrained_params.keys():
             clip_params["vision_channels"] = vision_pretrained_params["vision_channels"]
-    model = models_info.CLIP(
-        num_img_modalities=num_img_modalities, **clip_params)
+    model = models_info.CLIP(num_text_modalities=num_img_modalities,
+                             num_img_modalities=num_img_modalities, **clip_params)
     model.to(device)
     print(f"model is on {device}")
     if weights_conversion:
