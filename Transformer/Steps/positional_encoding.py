@@ -18,8 +18,3 @@ class PositionalEncoding(nn.Module):
         stacked = torch.stack([even_PE, odd_PE], dim=2)
         PE = torch.flatten(stacked, start_dim=1, end_dim=2)
         return PE
-
-
-pe = PositionalEncoding(d_model=6, max_sequence_length=10)
-PE = pe.forward()
-print(PE)
