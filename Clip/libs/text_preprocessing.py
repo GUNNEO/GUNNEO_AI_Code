@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from models.text_encoder_backbone.tokenizer import SimpleTokenizer
+from .tokenizer import SimpleTokenizer
 from transformers import AutoTokenizer
 from typing import Optional, List
 

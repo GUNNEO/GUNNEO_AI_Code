@@ -1,4 +1,3 @@
-import __init__
 import math
 import torch
 import torch.nn as nn
@@ -10,7 +9,7 @@ from tqdm import tqdm
 from pathlib import Path
 from typing import Optional, Union, List
 import libs.data_loader as data_loader
-import models.build_model as build_model
+import models.build_clip as build_clip
 import libs.text_preprocessing as text_utils
 import models.image_encoder_backbone.attn_gan_fusion as agf
 
@@ -19,7 +18,7 @@ import models.image_encoder_backbone.attn_gan_fusion as agf
 
 home_path = Path(__file__).parent
 system_name = platform.uname().system
-json_path = "hnscc_sorted_1.json"
+json_path = "hnscc_sorted.json"
 
 
 def parse_args():
@@ -32,10 +31,10 @@ def parse_args():
     parser.add_argument('--img_resolution', type=int, default=224)
     parser.add_argument('--img_num_slices', type=int, default=6)
     # setting for clip params
-    parser.add_argument('--num_text_modalities', type=int, default=2)
+    parser.add_argument('--num_text_modalities', type=int, default=1)
     parser.add_argument('--num_img_modalities', type=int, default=2)
     parser.add_argument('--clip_params', type=dict,
-                        default=build_model._clip_default_params())
+                        default=build_clip._clip_default_params())
     parser.add_argument('--text_pretrained', type=bool, default=False)
     parser.add_argument('--vision_pretrained', type=bool, default=False)
     parser.add_argument('--weights_conversion', type=int,
@@ -74,7 +73,7 @@ def make(
     # make the model here
     config.clip_params["vision_channels"] = config.img_num_slices
     config.clip_params["img_fusion_method"] = config.img_fusion_method
-    model = build_model.load_clip(
+    model = build_clip.load_clip(
         num_text_modalities=config.num_text_modalities,
         num_img_modalities=config.num_img_modalities,
         text_pretrained=config.text_pretrained,
@@ -213,7 +212,6 @@ def train(
                 p=p, lambda_0=config.lambda_0, gamma=config.gamma)
             # get the images
             images = sample["images"]
-            print(images.shape)
             # (b, n_m, h, w, d) -> (n_m, b, d, h, w)
 
             texts = sample["texts"]
@@ -230,9 +228,10 @@ def train(
                 lambda_adv=lambda_adv,
                 device=device
             )
-            return
             example_ct += images.shape[1]
             running_loss += loss.item()
+            print(loss)
+            return
 
             # Report metrics every `report_freq` batch
             if ((batch_idx + 1) % report_freq) == 0 or batch_idx == num_batches - 1:

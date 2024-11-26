@@ -4,7 +4,7 @@ from torchvision.ops.misc import Conv3dNormActivation
 import torch
 import torch.nn as nn
 import math
-from utils import LayerNorm, BatchNorm3d, QuickGELU
+from .utils import LayerNorm, BatchNorm3d, QuickGELU
 
 
 class ConvStemConfig(NamedTuple):

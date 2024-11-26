@@ -3,7 +3,7 @@ from typing import List
 import json
 import pandas as pd
 import shutil
-import libs.img_preprocessing as img_utils
+import img_preprocessing as img_utils
 
 
 def check_file_path(

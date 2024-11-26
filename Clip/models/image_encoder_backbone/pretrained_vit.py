@@ -12,7 +12,7 @@ from torchvision.utils import _log_api_usage_once
 from torchvision.models._api import register_model, Weights, WeightsEnum
 from torchvision.models._meta import _IMAGENET_CATEGORIES
 from torchvision.models._utils import _ovewrite_named_param, handle_legacy_interface
-from utils import LayerNorm, BatchNorm2d, QuickGELU
+from .utils import LayerNorm, BatchNorm2d, QuickGELU
 
 __all__ = [
     "VisionTransformer",

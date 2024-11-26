@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from utils import LayerNorm, BatchNorm1d, QuickGELU
+from .utils import LayerNorm, BatchNorm1d, QuickGELU
 
 
 # element-wise summation, element-wise product, element-wise maximum
